@@ -22,14 +22,14 @@ func TestSocketcreateHeader(t *testing.T) {
 
 func TestSocketConnect(t *testing.T) {
 	socket := NewZkSocket(testZkHost, testZkPort)
-	err := socket.Connect()
+	err := socket.Connect(0)
 	require.NoError(t, err)
 	defer socket.Disconnect()
 }
 
 func TestSocketGetAttendances(t *testing.T) {
 	socket := NewZkSocket(testZkHost, testZkPort)
-	err := socket.Connect()
+	err := socket.Connect(0)
 	require.NoError(t, err)
 	defer socket.Disconnect()
 
@@ -39,7 +39,7 @@ func TestSocketGetAttendances(t *testing.T) {
 
 func TestSocketGetUsers(t *testing.T) {
 	socket := NewZkSocket(testZkHost, testZkPort)
-	require.NoError(t, socket.Connect())
+	require.NoError(t, socket.Connect(0))
 
 	_, err := socket.GetUsers()
 	require.NoError(t, err)

@@ -15,7 +15,7 @@ import (
 type Zk interface {
 	GetAttendances() ([]*Attendance, error)
 	GetUsers() ([]*User, error)
-	Connect() error
+	Connect(pin int) error
 	Disconnect() error
 }
 
@@ -199,7 +199,7 @@ func (s *ZkSocket) createTCPTop(packet []byte) ([]byte, error) {
 }
 
 // Connect connects to the machine fingerprint
-func (s *ZkSocket) Connect() error {
+func (s *ZkSocket) Connect(pin int) error {
 	s.sessionID = 0
 	s.replyID = USHRT_MAX - 1
 
@@ -209,6 +209,18 @@ func (s *ZkSocket) Connect() error {
 	}
 
 	s.sessionID = res.CommandID
+
+	if res.Code == CMD_ACK_UNAUTH {
+		commandString, _ := s.makeCommKey(pin, s.sessionID, 50)
+		res, err := s.sendCommand(CMD_AUTH, commandString, 8)
+		if err != nil {
+			return err
+		}
+
+		if !res.Status {
+			return errors.New("unauthorized")
+		}
+	}
 
 	return nil
 }
@@ -626,4 +638,44 @@ func (s *ZkSocket) decodeTime(packet []byte) (time.Time, error) {
 
 	year := t + 2000
 	return time.Date(year, time.Month(month), day, hour, minute, second, 0, time.UTC), nil
+}
+
+// makeCommKey take a password and session_id and scramble them to send to the time clock.
+// copied from commpro.c - MakeKey
+func (s *ZkSocket) makeCommKey(key, sessionID int, ticks int) ([]byte, error) {
+	k := 0
+
+	for i := uint(0); i < 32; i++ {
+		if (key & (1 << i)) > 0 {
+			k = (k<<1 | 1)
+		} else {
+			k = k << 1
+		}
+	}
+
+	k += sessionID
+
+	pack, _ := s.bp.Pack([]string{"I"}, []interface{}{k})
+	unpack := s.mustUnpack([]string{"B", "B", "B", "B"}, pack)
+
+	pack, _ = s.bp.Pack([]string{"B", "B", "B", "B"}, []interface{}{
+		unpack[0].(int) ^ int('Z'),
+		unpack[1].(int) ^ int('K'),
+		unpack[2].(int) ^ int('S'),
+		unpack[3].(int) ^ int('O'),
+	})
+
+	unpack = s.mustUnpack([]string{"H", "H"}, pack)
+	pack, _ = s.bp.Pack([]string{"H", "H"}, []interface{}{unpack[0], unpack[1]})
+
+	b := 0xff & ticks
+	unpack = s.mustUnpack([]string{"B", "B", "B", "B"}, pack)
+	pack, _ = s.bp.Pack([]string{"B", "B", "B", "B"}, []interface{}{
+		unpack[0].(int) ^ b,
+		unpack[1].(int) ^ b,
+		b,
+		unpack[3].(int) ^ b,
+	})
+
+	return pack, nil
 }
