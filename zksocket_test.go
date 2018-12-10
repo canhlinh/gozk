@@ -10,7 +10,7 @@ import (
 // I'm too lazy to work to this project
 
 const (
-	testZkHost = "192.168.0.202"
+	testZkHost = "192.168.0.201"
 	testZkPort = 4370
 )
 
@@ -21,26 +21,26 @@ func TestSocketcreateHeader(t *testing.T) {
 }
 
 func TestSocketConnect(t *testing.T) {
-	socket := NewZkSocket(testZkHost, testZkPort)
-	err := socket.Connect(0)
+	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	err := socket.Connect()
 	require.NoError(t, err)
-	defer socket.Disconnect()
+	defer socket.Destroy()
 }
 
 func TestSocketGetAttendances(t *testing.T) {
-	socket := NewZkSocket(testZkHost, testZkPort)
-	err := socket.Connect(0)
+	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	err := socket.Connect()
 	require.NoError(t, err)
-	defer socket.Disconnect()
+	defer socket.Destroy()
 
 	_, err = socket.GetAttendances()
 	require.NoError(t, err)
 }
 
 func TestSocketGetUsers(t *testing.T) {
-	socket := NewZkSocket(testZkHost, testZkPort)
-	require.NoError(t, socket.Connect(0))
-
+	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	require.NoError(t, socket.Connect())
+	defer socket.Destroy()
 	_, err := socket.GetUsers()
 	require.NoError(t, err)
 }
