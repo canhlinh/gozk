@@ -222,7 +222,7 @@ func (s *ZkSocket) createSocket() error {
 		return nil
 	}
 
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", s.host, s.port), time.Second)
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", s.host, s.port), 3*time.Second)
 	if err != nil {
 		return err
 	}
