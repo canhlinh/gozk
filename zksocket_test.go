@@ -10,8 +10,9 @@ import (
 // I'm too lazy to work to this project
 
 const (
-	testZkHost = "192.168.0.201"
-	testZkPort = 4370
+	testZkHost   = "27.72.144.131"
+	testZkPort   = 4370
+	testTimezone = "Asia/Ho_Chi_Minh"
 )
 
 func TestSocketcreateHeader(t *testing.T) {
@@ -21,14 +22,14 @@ func TestSocketcreateHeader(t *testing.T) {
 }
 
 func TestSocketConnect(t *testing.T) {
-	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	socket := NewZkSocket(testZkHost, testZkPort, 0, testTimezone)
 	err := socket.Connect()
 	require.NoError(t, err)
 	defer socket.Destroy()
 }
 
 func TestSocketGetAttendances(t *testing.T) {
-	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	socket := NewZkSocket(testZkHost, testZkPort, 0, testTimezone)
 	err := socket.Connect()
 	require.NoError(t, err)
 	defer socket.Destroy()
@@ -36,10 +37,11 @@ func TestSocketGetAttendances(t *testing.T) {
 	attendances, err := socket.GetAttendances()
 	require.NoError(t, err)
 	t.Log(len(attendances))
+	t.Log(attendances[len(attendances)-1])
 }
 
 func TestSocketGetUsers(t *testing.T) {
-	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	socket := NewZkSocket(testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(t, socket.Connect())
 	defer socket.Destroy()
 	_, err := socket.GetUsers()
@@ -47,7 +49,7 @@ func TestSocketGetUsers(t *testing.T) {
 }
 
 func BenchmarkSocketGetAttendances(b *testing.B) {
-	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	socket := NewZkSocket(testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(b, socket.Connect())
 	defer socket.Destroy()
 

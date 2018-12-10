@@ -32,17 +32,23 @@ type ZkSocket struct {
 	pin       int
 	connected bool
 	lastData  []byte
+	location  *time.Location
 }
 
 // NewZkSocket creates a new ZkSocket
-func NewZkSocket(host string, port int, pin int) Zk {
+func NewZkSocket(host string, port int, pin int, timezone string) Zk {
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		panic(err)
+	}
 
 	zk := &ZkSocket{
-		conn: nil,
-		bp:   &binarypack.BinaryPack{},
-		host: host,
-		port: port,
-		pin:  pin,
+		conn:     nil,
+		bp:       &binarypack.BinaryPack{},
+		host:     host,
+		port:     port,
+		pin:      pin,
+		location: location,
 	}
 
 	if err := zk.createSocket(); err != nil {
@@ -699,7 +705,7 @@ func (s *ZkSocket) decodeTime(packet []byte) (time.Time, error) {
 	t = t / 12
 
 	year := t + 2000
-	return time.Date(year, time.Month(month), day, hour, minute, second, 0, time.UTC), nil
+	return time.Date(year, time.Month(month), day, hour, minute, second, 0, s.location), nil
 }
 
 // makeCommKey take a password and session_id and scramble them to send to the time clock.
