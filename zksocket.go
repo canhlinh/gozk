@@ -2,6 +2,7 @@ package gozk
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -15,8 +16,9 @@ import (
 type Zk interface {
 	GetAttendances() ([]*Attendance, error)
 	GetUsers() ([]*User, error)
-	Connect(pin int) error
+	Connect() error
 	Disconnect() error
+	Destroy() error
 }
 
 // ZkSocket presents a Zk's socket
@@ -25,19 +27,28 @@ type ZkSocket struct {
 	bp        *binarypack.BinaryPack
 	sessionID int
 	replyID   int
+	host      string
+	port      int
+	pin       int
+	connected bool
 }
 
 // NewZkSocket creates a new ZkSocket
-func NewZkSocket(host string, port int) Zk {
-	conn, err := net.DialTimeout("tcp", "192.168.0.201:4370", time.Second)
-	if err != nil {
+func NewZkSocket(host string, port int, pin int) Zk {
+
+	zk := &ZkSocket{
+		conn: nil,
+		bp:   &binarypack.BinaryPack{},
+		host: host,
+		port: port,
+		pin:  pin,
+	}
+
+	if err := zk.createSocket(); err != nil {
 		panic(err)
 	}
 
-	return &ZkSocket{
-		conn: conn,
-		bp:   &binarypack.BinaryPack{},
-	}
+	return zk
 }
 
 func (s *ZkSocket) createHeader(command int, commandString []byte, sessionID int, replyID int) ([]byte, error) {
@@ -198,8 +209,34 @@ func (s *ZkSocket) createTCPTop(packet []byte) ([]byte, error) {
 	return append(top, packet...), nil
 }
 
+func (s *ZkSocket) createSocket() error {
+	if s.conn != nil {
+		return nil
+	}
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", s.host, s.port), time.Second)
+	if err != nil {
+		return err
+	}
+
+	if err := conn.(*net.TCPConn).SetKeepAlive(true); err != nil {
+		return err
+	}
+
+	if err := conn.(*net.TCPConn).SetKeepAlivePeriod(30 * time.Second); err != nil {
+		return err
+	}
+	s.conn = conn
+
+	return nil
+}
+
 // Connect connects to the machine fingerprint
-func (s *ZkSocket) Connect(pin int) error {
+func (s *ZkSocket) Connect() error {
+	if s.connected {
+		return nil
+	}
+
 	s.sessionID = 0
 	s.replyID = USHRT_MAX - 1
 
@@ -211,7 +248,7 @@ func (s *ZkSocket) Connect(pin int) error {
 	s.sessionID = res.CommandID
 
 	if res.Code == CMD_ACK_UNAUTH {
-		commandString, _ := s.makeCommKey(pin, s.sessionID, 50)
+		commandString, _ := s.makeCommKey(s.pin, s.sessionID, 50)
 		res, err := s.sendCommand(CMD_AUTH, commandString, 8)
 		if err != nil {
 			return err
@@ -222,16 +259,36 @@ func (s *ZkSocket) Connect(pin int) error {
 		}
 	}
 
+	s.connected = true
 	return nil
 }
 
 // Disconnect disconnects out of the machine fingerprint
 func (s *ZkSocket) Disconnect() error {
+	if !s.connected {
+		return nil
+	}
+
 	if _, err := s.sendCommand(CMD_EXIT, nil, 8); err != nil {
 		return err
 	}
 
-	return s.conn.Close()
+	s.connected = false
+	return nil
+}
+
+// Destroy destroys the socket
+func (s *ZkSocket) Destroy() error {
+	if err := s.Disconnect(); err != nil {
+		return err
+	}
+
+	if err := s.conn.Close(); err != nil {
+		return err
+	}
+
+	s.conn = nil
+	return nil
 }
 
 func (s *ZkSocket) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
