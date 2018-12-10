@@ -33,8 +33,9 @@ func TestSocketGetAttendances(t *testing.T) {
 	require.NoError(t, err)
 	defer socket.Destroy()
 
-	_, err = socket.GetAttendances()
+	attendances, err := socket.GetAttendances()
 	require.NoError(t, err)
+	t.Log(len(attendances))
 }
 
 func TestSocketGetUsers(t *testing.T) {
@@ -43,4 +44,15 @@ func TestSocketGetUsers(t *testing.T) {
 	defer socket.Destroy()
 	_, err := socket.GetUsers()
 	require.NoError(t, err)
+}
+
+func BenchmarkSocketGetAttendances(b *testing.B) {
+	socket := NewZkSocket(testZkHost, testZkPort, 0)
+	require.NoError(b, socket.Connect())
+	defer socket.Destroy()
+
+	for i := 0; i < b.N; i++ {
+		_, err := socket.GetAttendances()
+		require.NoError(b, err)
+	}
 }

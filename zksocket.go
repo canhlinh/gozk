@@ -31,6 +31,7 @@ type ZkSocket struct {
 	port      int
 	pin       int
 	connected bool
+	lastData  []byte
 }
 
 // NewZkSocket creates a new ZkSocket
@@ -137,6 +138,7 @@ func (s *ZkSocket) createCheckSum(p []interface{}) ([]byte, error) {
 }
 
 func (s *ZkSocket) sendCommand(command int, commandString []byte, responseSize int) (*Response, error) {
+
 	if commandString == nil {
 		commandString = make([]byte, 0)
 	}
@@ -162,11 +164,11 @@ func (s *ZkSocket) sendCommand(command int, commandString []byte, responseSize i
 
 	bytesReceived, err := s.conn.Read(dataReceived)
 	if err != nil && err != io.EOF {
-		return nil, err
+		return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
 	}
 
-	if bytesReceived < 16 {
-		return nil, errors.New("Unknow error")
+	if bytesReceived == 0 {
+		return nil, errors.New("TCP packet invalid")
 	}
 
 	receivedHeader, err := s.bp.UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
@@ -175,8 +177,10 @@ func (s *ZkSocket) sendCommand(command int, commandString []byte, responseSize i
 	}
 
 	s.replyID = receivedHeader[3].(int)
-	tcpLength := s.testTCPTop(dataReceived)
 	dataReceived = dataReceived[16:bytesReceived]
+	tcpLength := s.testTCPTop(dataReceived)
+	s.lastData = dataReceived
+
 	resCode := receivedHeader[0].(int)
 	commandID := receivedHeader[2].(int)
 
@@ -186,7 +190,6 @@ func (s *ZkSocket) sendCommand(command int, commandString []byte, responseSize i
 			Status:    true,
 			Code:      resCode,
 			TCPLength: tcpLength,
-			Data:      dataReceived,
 			CommandID: commandID,
 		}, nil
 	default:
@@ -194,7 +197,6 @@ func (s *ZkSocket) sendCommand(command int, commandString []byte, responseSize i
 			Status:    false,
 			Code:      resCode,
 			TCPLength: tcpLength,
-			Data:      dataReceived,
 			CommandID: receivedHeader[2].(int),
 		}, nil
 	}
@@ -223,7 +225,7 @@ func (s *ZkSocket) createSocket() error {
 		return err
 	}
 
-	if err := conn.(*net.TCPConn).SetKeepAlivePeriod(30 * time.Second); err != nil {
+	if err := conn.(*net.TCPConn).SetKeepAlivePeriod(1 * time.Minute); err != nil {
 		return err
 	}
 	s.conn = conn
@@ -308,20 +310,20 @@ func (s *ZkSocket) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 
 	if res.Code == CMD_DATA {
 
-		if need := res.TCPLength - 8 - len(res.Data); need > 0 {
+		if need := res.TCPLength - 8 - len(s.lastData); need > 0 {
 			moreData, err := s.receiveRawData(need)
 			if err != nil {
 				return nil, 0, err
 			}
 
-			data := append(res.Data, moreData...)
+			data := append(s.lastData, moreData...)
 			return data, len(data), nil
 		}
 
-		return res.Data, len(res.Data), nil
+		return s.lastData, len(s.lastData), nil
 	}
 
-	sizeUnpack, err := s.bp.UnPack([]string{"I"}, res.Data[1:5])
+	sizeUnpack, err := s.bp.UnPack([]string{"I"}, s.lastData[1:5])
 	if err != nil {
 		return nil, 0, err
 	}
@@ -353,12 +355,15 @@ func (s *ZkSocket) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 		start += remain
 	}
 
-	s.freeData()
+	if err := s.freeData(); err != nil {
+		return nil, 0, err
+	}
+
 	return data, start, nil
 }
 
 func (s *ZkSocket) freeData() error {
-	if _, err := s.sendCommand(CMD_FREE_DATA, nil, 0); err != nil {
+	if _, err := s.sendCommand(CMD_FREE_DATA, nil, 8); err != nil {
 		return err
 	}
 
@@ -435,17 +440,17 @@ func (s *ZkSocket) GetAttendances() ([]*Attendance, error) {
 }
 
 func (s *ZkSocket) readSize() (int, error) {
-	res, err := s.sendCommand(CMD_GET_FREE_SIZES, nil, 1024)
-	if err != nil {
+	if _, err := s.sendCommand(CMD_GET_FREE_SIZES, nil, 1024); err != nil {
 		return 0, err
 	}
 
-	if len(res.Data) >= 80 {
+	if len(s.lastData) >= 80 {
 		pad := []string{}
 		for i := 0; i < 20; i++ {
 			pad = append(pad, "i")
 		}
-		return s.mustUnpack(pad, res.Data[:80])[8].(int), nil
+		s.lastData = s.lastData[:80]
+		return s.mustUnpack(pad, s.lastData)[8].(int), nil
 	}
 
 	return 0, nil
@@ -487,7 +492,7 @@ func (s *ZkSocket) readChunk(start, size int) ([]byte, error) {
 			return nil, err
 		}
 
-		data, err := s.receiveChunk(res.Code, res.Data, res.TCPLength)
+		data, err := s.receiveChunk(res.Code, res.TCPLength)
 		if err != nil {
 			return nil, err
 		}
@@ -498,32 +503,32 @@ func (s *ZkSocket) readChunk(start, size int) ([]byte, error) {
 	return nil, errors.New("can't read chunk")
 }
 
-func (s *ZkSocket) receiveChunk(responseCode int, lastData []byte, tcpLength int) ([]byte, error) {
+func (s *ZkSocket) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
 
 	switch responseCode {
 	case CMD_DATA:
-		if need := tcpLength - 8 - len(lastData); need > 0 {
+		if need := tcpLength - 8 - len(s.lastData); need > 0 {
 			moreData, err := s.receiveRawData(need)
 			if err != nil {
 				return nil, err
 			}
-			return append(lastData, moreData...), nil
+			return append(s.lastData, moreData...), nil
 		}
 
-		return lastData, nil
+		return s.lastData, nil
 	case CMD_PREPARE_DATA:
 
 		data := []byte{}
-		size, err := s.getDataSize(responseCode, lastData)
+		size, err := s.getDataSize(responseCode, s.lastData)
 		if err != nil {
 			return nil, err
 		}
 
 		dataReceived := []byte{}
-		if len(lastData) >= 8+size {
-			dataReceived = lastData[8:]
+		if len(s.lastData) >= 8+size {
+			dataReceived = s.lastData[8:]
 		} else {
-			dataReceived = append(lastData[8:], s.mustReceiveData(size+32)...)
+			dataReceived = append(s.lastData[8:], s.mustReceiveData(size+32)...)
 		}
 
 		d, brokenHeader, err := s.receiveTCPData(dataReceived, size)

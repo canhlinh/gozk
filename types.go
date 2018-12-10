@@ -9,7 +9,6 @@ type Response struct {
 	Status    bool
 	Code      int
 	TCPLength int
-	Data      []byte
 	CommandID int
 }
 
