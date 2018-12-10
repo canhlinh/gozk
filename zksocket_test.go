@@ -10,7 +10,7 @@ import (
 // I'm too lazy to work to this project
 
 const (
-	testZkHost   = "27.72.144.131"
+	testZkHost   = "192.168.0.201"
 	testZkPort   = 4370
 	testTimezone = "Asia/Ho_Chi_Minh"
 )
