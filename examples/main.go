@@ -2,6 +2,10 @@ package main
 
 import (
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/canhlinh/gozk"
 )
@@ -12,12 +16,38 @@ func main() {
 		panic(err)
 	}
 
-	c, err := zkSocket.LiveCapture()
+	quit := make(chan bool)
+	c, err := zkSocket.LiveCapture(quit)
 	if err != nil {
 		panic(err)
 	}
 
-	for event := range c {
-		log.Println(event)
+	go func() {
+		for event := range c {
+			log.Println(event)
+		}
+	}()
+
+	f := func() {
+		quit <- true
+		zkSocket.Disconnect()
+	}
+
+	gracefulQuit(f)
+}
+
+func gracefulQuit(f func()) {
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+
+		log.Println("Stopping...")
+		f()
+		os.Exit(1)
+	}()
+
+	for {
+		time.Sleep(10 * time.Second) // or runtime.Gosched() or similar per @misterbee
 	}
 }
