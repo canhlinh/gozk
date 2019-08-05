@@ -7,17 +7,17 @@ import (
 )
 
 func main() {
-	zkSocket := gozk.NewZkSocket("192.168.0.202", 4370)
+	zkSocket := gozk.NewZkSocket("192.168.0.201", 4370, 0, gozk.DefaultTimezone)
 	if err := zkSocket.Connect(); err != nil {
 		panic(err)
 	}
 
-	attendances, err := zkSocket.GetAttendances()
+	c, err := zkSocket.LiveCapture()
 	if err != nil {
 		panic(err)
 	}
 
-	for _, attendance := range attendances {
-		log.Println(attendance)
+	for event := range c {
+		log.Println(event)
 	}
 }
