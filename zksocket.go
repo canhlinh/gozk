@@ -4,12 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
 	binarypack "github.com/canhlinh/go-binary-pack"
+)
+
+const (
+	DefaultTimezone = "Asia/Ho_Chi_Minh"
 )
 
 // Zk provides accesses to Zk machine fingerprint
@@ -19,6 +24,7 @@ type Zk interface {
 	Connect() error
 	Disconnect() error
 	Destroy() error
+	LiveCapture(quit <-chan bool) (chan *Attendance, error)
 }
 
 // ZkSocket presents a Zk's socket
@@ -234,6 +240,7 @@ func (s *ZkSocket) createSocket() error {
 	if err := conn.(*net.TCPConn).SetKeepAlivePeriod(1 * time.Minute); err != nil {
 		return err
 	}
+
 	s.conn = conn
 
 	return nil
@@ -746,4 +753,153 @@ func (s *ZkSocket) makeCommKey(key, sessionID int, ticks int) ([]byte, error) {
 	})
 
 	return pack, nil
+}
+
+// LiveCapture live capture events
+// Caution: This function may corrupt other function which are reading socket
+func (s *ZkSocket) LiveCapture(quit <-chan bool) (chan *Attendance, error) {
+	s.cancelCapture()
+
+	if err := s.verifyUser(); err != nil {
+		return nil, err
+	}
+
+	if err := s.enableDevice(); err != nil {
+		return nil, err
+	}
+
+	if err := s.regEvent(EF_ATTLOG); err != nil {
+		return nil, err
+	}
+	log.Println("Capturing events...")
+
+	c := make(chan *Attendance)
+	go func() {
+		defer close(c)
+		for {
+			select {
+			case <-quit:
+				s.disableDevice()
+				log.Println("Stoped capturing")
+				return
+			default:
+
+				s.conn.SetReadDeadline(time.Now().Add(time.Second * 10))
+
+				data, err := s.receiveData(1032)
+				if err != nil {
+					// SKIP
+					continue
+				}
+
+				if len(data) == 0 {
+					// SKIP
+					continue
+				}
+
+				header := s.mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
+				data = data[16:]
+
+				if header[0].(int) == CMD_REG_EVENT {
+					// SKIP
+					log.Println("Skip REG EVENT")
+					continue
+				}
+
+				for len(data) >= 12 {
+					unpack := []interface{}{}
+
+					if len(data) == 12 {
+						unpack = s.mustUnpack([]string{"I", "B", "B", "6s"}, data)
+						data = data[12:]
+					} else if len(data) == 32 {
+						unpack = s.mustUnpack([]string{"24s", "B", "B", "6s"}, data[:32])
+						data = data[32:]
+					} else if len(data) == 36 {
+						unpack = s.mustUnpack([]string{"24s", "B", "B", "6s", "4s"}, data[:36])
+						data = data[36:]
+					} else if len(data) >= 52 {
+						unpack = s.mustUnpack([]string{"24s", "B", "B", "6s", "20s"}, data[:52])
+						data = data[52:]
+					}
+
+					timestamp, err := s.decodeTime([]byte(unpack[3].(string)))
+					if err != nil {
+						log.Println(err)
+						return
+					}
+
+					userID, err := strconv.ParseInt(strings.Replace(unpack[0].(string), "\x00", "", -1), 10, 64)
+					if err != nil {
+						log.Println(err)
+						return
+					}
+
+					c <- &Attendance{UserID: userID, AttendedAt: timestamp}
+					log.Printf("UserID %v timestampe %v \n", userID, timestamp)
+				}
+			}
+		}
+	}()
+
+	return c, nil
+}
+
+func (s *ZkSocket) cancelCapture() {
+	s.sendCommand(CMD_CANCELCAPTURE, nil, 8)
+}
+
+func (s *ZkSocket) regEvent(flag int) error {
+	pack, _ := s.bp.Pack([]string{"I"}, []interface{}{flag})
+	res, err := s.sendCommand(CMD_REG_EVENT, pack, 8)
+	if err != nil {
+		return err
+	}
+
+	if !res.Status {
+		return errors.New("cant' reg events")
+	}
+
+	return nil
+}
+
+func (s *ZkSocket) verifyUser() error {
+	res, err := s.sendCommand(CMD_STARTVERIFY, nil, 8)
+	if err != nil {
+		return err
+	}
+
+	if !res.Status {
+		return errors.New("Can't verify user")
+	}
+
+	return nil
+}
+
+func (s *ZkSocket) enableDevice() error {
+	s.disableDevice()
+
+	res, err := s.sendCommand(CMD_ENABLEDEVICE, nil, 8)
+	if err != nil {
+		return err
+	}
+
+	if !res.Status {
+		return errors.New("Failed to enable device")
+	}
+
+	return nil
+}
+
+func (s *ZkSocket) disableDevice() error {
+	res, err := s.sendCommand(CMD_DISABLEDEVICE, nil, 8)
+	if err != nil {
+		return err
+	}
+
+	if !res.Status {
+		return errors.New("Failed to disable device")
+	}
+
+	return nil
 }
