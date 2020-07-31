@@ -13,6 +13,11 @@ import (
 	binarypack "github.com/canhlinh/go-binary-pack"
 )
 
+var (
+	ReadSocketTimeout = 3 * time.Second
+	KeepAlivePeriod   = 10 * time.Second
+)
+
 const (
 	DefaultTimezone = "Asia/Ho_Chi_Minh"
 )
@@ -29,7 +34,7 @@ type Zk interface {
 
 // ZkSocket presents a Zk's socket
 type ZkSocket struct {
-	conn      net.Conn
+	conn      *net.TCPConn
 	bp        *binarypack.BinaryPack
 	sessionID int
 	replyID   int
@@ -171,7 +176,7 @@ func (s *ZkSocket) sendCommand(command int, commandString []byte, responseSize i
 		return nil, errors.New("Failed to write command")
 	}
 
-	s.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	s.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
 	dataReceived := make([]byte, responseSize+8)
 
 	bytesReceived, err := s.conn.Read(dataReceived)
@@ -233,16 +238,16 @@ func (s *ZkSocket) createSocket() error {
 		return err
 	}
 
-	if err := conn.(*net.TCPConn).SetKeepAlive(true); err != nil {
+	tcpConnection := conn.(*net.TCPConn)
+	if err := tcpConnection.SetKeepAlive(true); err != nil {
 		return err
 	}
 
-	if err := conn.(*net.TCPConn).SetKeepAlivePeriod(1 * time.Minute); err != nil {
+	if err := tcpConnection.SetKeepAlivePeriod(KeepAlivePeriod); err != nil {
 		return err
 	}
 
-	s.conn = conn
-
+	s.conn = tcpConnection
 	return nil
 }
 
@@ -261,6 +266,7 @@ func (s *ZkSocket) Connect() error {
 	}
 
 	s.sessionID = res.CommandID
+	log.Println("Connected with session_id", s.sessionID)
 
 	if res.Code == CMD_ACK_UNAUTH {
 		commandString, _ := s.makeCommKey(s.pin, s.sessionID, 50)
@@ -288,22 +294,18 @@ func (s *ZkSocket) Disconnect() error {
 		return err
 	}
 
+	if err := s.conn.Close(); err != nil {
+		return err
+	}
+
 	s.connected = false
+	s.conn = nil
 	return nil
 }
 
 // Destroy destroys the socket
 func (s *ZkSocket) Destroy() error {
-	if err := s.Disconnect(); err != nil {
-		return err
-	}
-
-	if err := s.conn.Close(); err != nil {
-		return err
-	}
-
-	s.conn = nil
-	return nil
+	return s.Disconnect()
 }
 
 func (s *ZkSocket) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
