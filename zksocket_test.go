@@ -1,7 +1,6 @@
 package gozk
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -32,12 +31,7 @@ func TestSocketConnect(t *testing.T) {
 func TestSocketGetAttendances(t *testing.T) {
 	socket := NewZkSocket(testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(t, socket.Connect())
-	for i := 0; i < 10; i++ {
-		attendances, err := socket.GetAttendances()
-		require.NoError(t, err)
-		fmt.Println("number of attendances", len(attendances))
-		time.Sleep(time.Second * 1)
-	}
+	require.NoError(t, socket.DisableDevice())
 	attendances, err := socket.GetAttendances()
 	require.NoError(t, err)
 	t.Log("number of attendances", len(attendances))

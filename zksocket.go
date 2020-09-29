@@ -30,6 +30,8 @@ type Zk interface {
 	Disconnect() error
 	Destroy() error
 	LiveCapture(quit <-chan bool) (chan *Attendance, error)
+	DisableDevice() error
+	EnableDevice() error
 }
 
 // ZkSocket presents a Zk's socket
@@ -766,7 +768,7 @@ func (s *ZkSocket) LiveCapture(quit <-chan bool) (chan *Attendance, error) {
 		return nil, err
 	}
 
-	if err := s.enableDevice(); err != nil {
+	if err := s.EnableDevice(); err != nil {
 		return nil, err
 	}
 
@@ -781,7 +783,7 @@ func (s *ZkSocket) LiveCapture(quit <-chan bool) (chan *Attendance, error) {
 		for {
 			select {
 			case <-quit:
-				s.disableDevice()
+				s.DisableDevice()
 				log.Println("Stoped capturing")
 				return
 			default:
@@ -878,8 +880,7 @@ func (s *ZkSocket) verifyUser() error {
 	return nil
 }
 
-func (s *ZkSocket) enableDevice() error {
-	s.disableDevice()
+func (s *ZkSocket) EnableDevice() error {
 
 	res, err := s.sendCommand(CMD_ENABLEDEVICE, nil, 8)
 	if err != nil {
@@ -893,7 +894,7 @@ func (s *ZkSocket) enableDevice() error {
 	return nil
 }
 
-func (s *ZkSocket) disableDevice() error {
+func (s *ZkSocket) DisableDevice() error {
 	res, err := s.sendCommand(CMD_DISABLEDEVICE, nil, 8)
 	if err != nil {
 		return err
