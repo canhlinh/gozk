@@ -300,14 +300,19 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 		}
 	}
 
-	log4go.Info("Start capturing")
+	if err := zk.regEvent(EF_ATTLOG); err != nil {
+		return nil, err
+	}
 
+	log4go.Info("Start capturing")
 	zk.capturing = make(chan bool, 1)
 	c := make(chan *Attendance, 1)
+
 	go func() {
 
 		defer func() {
 			log4go.Info("Stopped capturing")
+			zk.regEvent(0)
 			close(c)
 		}()
 
@@ -317,7 +322,7 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 				return
 			default:
 
-				data, err := zk.receiveData(1032, time.Second*10)
+				data, err := zk.receiveData(1032, KeepAlivePeriod)
 				if err != nil && !strings.Contains(err.Error(), "timeout") {
 					log4go.Error(err)
 					return
