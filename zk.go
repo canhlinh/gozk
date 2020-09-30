@@ -362,18 +362,13 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 						data = data[52:]
 					}
 
-					timestamp, err := zk.decodeTime([]byte(unpack[3].(string)))
-					if err != nil {
-						log.Println(err)
-						continue
-					}
-
 					userID, err := strconv.ParseInt(strings.Replace(unpack[0].(string), "\x00", "", -1), 10, 64)
 					if err != nil {
 						log.Println(err)
 						continue
 					}
 
+					timestamp := time.Now().In(zk.loc)
 					c <- &Attendance{UserID: userID, AttendedAt: timestamp}
 					log.Printf("UserID %v timestampe %v \n", userID, timestamp)
 				}
