@@ -38,6 +38,8 @@ func gracefulQuit(f func()) {
 
 		log.Println("Stopping...")
 		f()
+
+		time.Sleep(time.Second * 1)
 		os.Exit(1)
 	}()
 
