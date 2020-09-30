@@ -11,13 +11,12 @@ import (
 )
 
 func main() {
-	zkSocket := gozk.NewZkSocket("192.168.0.201", 4370, 0, gozk.DefaultTimezone)
+	zkSocket := gozk.NewZK("192.168.0.201", 4370, 0, gozk.DefaultTimezone)
 	if err := zkSocket.Connect(); err != nil {
 		panic(err)
 	}
 
-	quit := make(chan bool)
-	c, err := zkSocket.LiveCapture(quit)
+	c, err := zkSocket.LiveCapture()
 	if err != nil {
 		panic(err)
 	}
@@ -28,12 +27,7 @@ func main() {
 		}
 	}()
 
-	f := func() {
-		quit <- true
-		zkSocket.Disconnect()
-	}
-
-	gracefulQuit(f)
+	gracefulQuit(zkSocket.StopCapture)
 }
 
 func gracefulQuit(f func()) {
