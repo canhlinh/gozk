@@ -384,3 +384,14 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 func (zk ZK) StopCapture() {
 	zk.capturing <- false
 }
+
+func (zk ZK) Clone() *ZK {
+	return &ZK{
+		host:      zk.host,
+		port:      zk.port,
+		pin:       zk.pin,
+		loc:       zk.loc,
+		sessionID: 0,
+		replyID:   USHRT_MAX - 1,
+	}
+}
