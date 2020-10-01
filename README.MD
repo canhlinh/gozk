@@ -12,29 +12,57 @@ GOZK is a library to help gopher interact with ZK fingerprint machine
 
 ## Getting started
 
+Get source: ```go get github.com/canhlinh/gozk```
+
+Sample:
 ```
 package main
 
 import (
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/canhlinh/gozk"
 )
 
 func main() {
-	zkSocket := gozk.NewZkSocket("192.168.0.202", 4370)
+	zkSocket := gozk.NewZK("192.168.0.201", 4370, 0, gozk.DefaultTimezone)
 	if err := zkSocket.Connect(); err != nil {
 		panic(err)
 	}
 
-	attendances, err := zkSocket.GetAttendances()
+	c, err := zkSocket.LiveCapture()
 	if err != nil {
 		panic(err)
 	}
 
-	for _, attendance := range attendances {
-		log.Println(attendance)
-	}
+	go func() {
+		for event := range c {
+			log.Println(event)
+		}
+	}()
+
+	gracefulQuit(zkSocket.StopCapture)
 }
 
+func gracefulQuit(f func()) {
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+
+		log.Println("Stopping...")
+		f()
+
+		time.Sleep(time.Second * 1)
+		os.Exit(1)
+	}()
+
+	for {
+		time.Sleep(10 * time.Second) // or runtime.Gosched() or similar per @misterbee
+	}
+}
 ```
