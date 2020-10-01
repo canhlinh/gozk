@@ -374,3 +374,16 @@ func (zk *ZK) ackOK() error {
 
 	return nil
 }
+
+func (zk *ZK) decodeTimeHex(timehex []byte) time.Time {
+	data := mustUnpack([]string{"B", "B", "B", "B", "B", "B"}, timehex)
+	year := data[0].(int)
+	month := data[1].(int)
+	day := data[2].(int)
+	hour := data[3].(int)
+	minute := data[4].(int)
+	second := data[5].(int)
+
+	year += 2000
+	return time.Date(year, time.Month(month), day, hour, minute, second, 0, zk.loc)
+}
