@@ -368,9 +368,16 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 					continue
 				}
 
-				// size := mustUnpack([]string{"H", "H", "I"}, data[:8])[2].(int)
-				header := mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
-				data = data[16:]
+				header := make([]interface{},8)
+				if zk.forceUDP {
+					// UDP
+					header = mustUnpack([]string{"H", "H", "H", "H"}, data[:8])
+					data = data[8:]
+				}else{
+					// TCP
+					header = mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
+					data = data[16:]
+				}
 
 				if header[0].(int) != CMD_REG_EVENT {
 					log.Println("Skip REG EVENT")
