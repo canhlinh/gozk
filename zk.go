@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DefaultTimezone = "Asia/Ho_Chi_Minh"
+	DefaultTimezone = "Europe/Paris"
 )
 
 var (
@@ -23,7 +23,7 @@ var (
 )
 
 type ZK struct {
-	conn      *net.TCPConn
+	conn      net.Conn
 	sessionID int
 	replyID   int
 	host      string
@@ -32,10 +32,11 @@ type ZK struct {
 	loc       *time.Location
 	lastData  []byte
 	disabled  bool
+	forceUDP  bool
 	capturing chan bool
 }
 
-func NewZK(host string, port int, pin int, timezone string) *ZK {
+func NewZK(host string, port int, pin int, timezone string, forceUDP bool) *ZK {
 	return &ZK{
 		host:      host,
 		port:      port,
@@ -43,6 +44,7 @@ func NewZK(host string, port int, pin int, timezone string) *ZK {
 		loc:       LoadLocation(timezone),
 		sessionID: 0,
 		replyID:   USHRT_MAX - 1,
+		forceUDP:  forceUDP,
 	}
 }
 
@@ -51,21 +53,30 @@ func (zk *ZK) Connect() error {
 		return errors.New("Already connected")
 	}
 
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", zk.host, zk.port), 3*time.Second)
+	protocol := "tcp"
+
+	if zk.forceUDP {
+		protocol = "udp"
+	}
+
+	conn, err := net.DialTimeout(protocol, fmt.Sprintf("%s:%d", zk.host, zk.port), 10*time.Second)
 	if err != nil {
 		return err
 	}
 
-	tcpConnection := conn.(*net.TCPConn)
-	if err := tcpConnection.SetKeepAlive(true); err != nil {
-		return err
+	// set TCP keepalive
+	if zk.forceUDP==false {
+		tcpConnection := conn.(*net.TCPConn)
+		if err := tcpConnection.SetKeepAlive(true); err != nil {
+			return err
+		}
+
+		if err := tcpConnection.SetKeepAlivePeriod(KeepAlivePeriod); err != nil {
+			return err
+		}
 	}
 
-	if err := tcpConnection.SetKeepAlivePeriod(KeepAlivePeriod); err != nil {
-		return err
-	}
-
-	zk.conn = tcpConnection
+	zk.conn = conn
 
 	res, err := zk.sendCommand(CMD_CONNECT, nil, 8)
 	if err != nil {
@@ -101,19 +112,31 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 		return nil, err
 	}
 
-	top, err := createTCPTop(header)
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
+	if zk.forceUDP {
+		// UDP
+		if n, err := zk.conn.Write(header); err != nil {
+			return nil, err
+		} else if n == 0 {
+			return nil, errors.New("Failed to write command")
+		}
+	} else {
+		// TCP
+		top, err := createTCPTop(header)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
 
-	if n, err := zk.conn.Write(top); err != nil {
-		return nil, err
-	} else if n == 0 {
-		return nil, errors.New("Failed to write command")
+		if n, err := zk.conn.Write(top); err != nil {
+			return nil, err
+		} else if n == 0 {
+			return nil, errors.New("Failed to write command")
+		}
 	}
-
 	zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
+
+	// TCP packet have 8 extras bytes than UDP
 	dataReceived := make([]byte, responseSize+8)
+	receivedHeader := make([]interface{},8)
 
 	bytesReceived, err := zk.conn.Read(dataReceived)
 	if err != nil && err != io.EOF {
@@ -121,15 +144,24 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 	}
 
 	if bytesReceived == 0 {
-		return nil, errors.New("TCP packet invalid")
+		return nil, errors.New("Invalid packet")
 	}
 
-	receivedHeader, err := newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
-	if err != nil {
-		return nil, err
+	if zk.forceUDP {
+		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[0:8])
+		if err != nil {
+			return nil, err
+		}
+		dataReceived = dataReceived[:bytesReceived]
+	} else {
+		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
+		if err != nil {
+			return nil, err
+		}
+		dataReceived = dataReceived[16:bytesReceived]
 	}
 
-	dataReceived = dataReceived[16:bytesReceived]
+	
 	tcpLength := testTCPTop(dataReceived)
 	resCode := receivedHeader[0].(int)
 	commandID := receivedHeader[2].(int)
@@ -393,5 +425,6 @@ func (zk ZK) Clone() *ZK {
 		loc:       zk.loc,
 		sessionID: 0,
 		replyID:   USHRT_MAX - 1,
+		forceUDP: zk.forceUDP,
 	}
 }

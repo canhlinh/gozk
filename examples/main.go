@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	zkSocket := gozk.NewZK("192.168.0.201", 4370, 0, gozk.DefaultTimezone)
+	zkSocket := gozk.NewZK("192.168.0.201", 4370, 0, gozk.DefaultTimezone,false)
 	if err := zkSocket.Connect(); err != nil {
 		panic(err)
 	}
