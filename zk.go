@@ -109,33 +109,28 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 	if n, err := zk.conn.Write(top); err != nil {
 		return nil, err
 	} else if n == 0 {
-		return nil, errors.New("Failed to write command")
+		return nil, errors.New("failed to write command")
 	}
 
 	zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
-	dataReceived := make([]byte, responseSize+8)
-
-	bytesReceived, err := zk.conn.Read(dataReceived)
+	tcpDataRecieved := make([]byte, responseSize+8)
+	bytesReceived, err := zk.conn.Read(tcpDataRecieved)
 	if err != nil && err != io.EOF {
 		return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
 	}
-
-	if bytesReceived == 0 {
+	tcpLength := testTCPTop(tcpDataRecieved)
+	if bytesReceived == 0 || tcpLength == 0 {
 		return nil, errors.New("TCP packet invalid")
 	}
-
-	receivedHeader, err := newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
+	receivedHeader, err := newBP().UnPack([]string{"H", "H", "H", "H"}, tcpDataRecieved[8:16])
 	if err != nil {
 		return nil, err
 	}
 
-	dataReceived = dataReceived[16:bytesReceived]
-	tcpLength := testTCPTop(dataReceived)
 	resCode := receivedHeader[0].(int)
 	commandID := receivedHeader[2].(int)
-
 	zk.replyID = receivedHeader[3].(int)
-	zk.lastData = dataReceived
+	zk.lastData = tcpDataRecieved[16:bytesReceived]
 
 	switch resCode {
 	case CMD_ACK_OK, CMD_PREPARE_DATA, CMD_DATA:
@@ -144,13 +139,17 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			Code:      resCode,
 			TCPLength: tcpLength,
 			CommandID: commandID,
+			Data:      zk.lastData,
+			ReplyID:   zk.replyID,
 		}, nil
 	default:
 		return &Response{
 			Status:    false,
 			Code:      resCode,
 			TCPLength: tcpLength,
-			CommandID: receivedHeader[2].(int),
+			CommandID: commandID,
+			Data:      zk.lastData,
+			ReplyID:   zk.replyID,
 		}, nil
 	}
 }
@@ -394,4 +393,34 @@ func (zk ZK) Clone() *ZK {
 		sessionID: 0,
 		replyID:   USHRT_MAX - 1,
 	}
+}
+
+func (zk *ZK) GetTime() (time.Time, error) {
+	res, err := zk.sendCommand(CMD_GET_TIME, nil, 1032)
+	if err != nil {
+		return time.Now(), err
+	}
+	if !res.Status {
+		return time.Now(), errors.New("can not get time")
+	}
+
+	return zk.decodeTime(res.Data[:4])
+}
+
+func (zk *ZK) SetTime(t time.Time) error {
+	truncatedTime := t.Truncate(time.Second)
+	log.Println("Set new time:", truncatedTime)
+
+	commandString, err := newBP().Pack([]string{"I"}, []interface{}{zk.encodeTime(truncatedTime)})
+	if err != nil {
+		return err
+	}
+	res, err := zk.sendCommand(CMD_SET_TIME, commandString, 8)
+	if err != nil {
+		return err
+	}
+	if !res.Status {
+		return errors.New("can not set time")
+	}
+	return nil
 }

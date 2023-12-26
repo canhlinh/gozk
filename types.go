@@ -10,6 +10,8 @@ type Response struct {
 	Code      int
 	TCPLength int
 	CommandID int
+	Data      []byte
+	ReplyID   int
 }
 
 type User struct {

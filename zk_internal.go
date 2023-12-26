@@ -387,3 +387,8 @@ func (zk *ZK) decodeTimeHex(timehex []byte) time.Time {
 	year += 2000
 	return time.Date(year, time.Month(month), day, hour, minute, second, 0, zk.loc)
 }
+
+func (zk *ZK) encodeTime(t time.Time) int {
+	return (((t.Year()%100)*12*31+((int(t.Month())-1)*31)+t.Day()-1)*
+		(24*60*60) + (t.Hour()*60+t.Minute())*60 + t.Second())
+}
