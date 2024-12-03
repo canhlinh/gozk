@@ -48,7 +48,7 @@ func NewZK(host string, port int, pin int, timezone string) *ZK {
 
 func (zk *ZK) Connect() error {
 	if zk.conn != nil {
-		return errors.New("Already connected")
+		return errors.New("already connected")
 	}
 
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", zk.host, zk.port), 3*time.Second)
@@ -154,10 +154,24 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 	}
 }
 
+func (zk *ZK) Unlock(unlockTime int) error {
+	commandString, _ := newBP().Pack([]string{"I"}, []interface{}{unlockTime})
+	res, err := zk.sendCommand(CMD_UNLOCK, commandString, 8)
+	if err != nil {
+		return err
+	}
+
+	if !res.Status {
+		return errors.New("failed to unlock device")
+	}
+
+	return nil
+}
+
 // Disconnect disconnects out of the machine fingerprint
 func (zk *ZK) Disconnect() error {
 	if zk.conn == nil {
-		return errors.New("Already disconnected")
+		return errors.New("already disconnected")
 	}
 
 	if _, err := zk.sendCommand(CMD_EXIT, nil, 8); err != nil {
@@ -181,7 +195,7 @@ func (zk *ZK) EnableDevice() error {
 	}
 
 	if !res.Status {
-		return errors.New("Failed to enable device")
+		return errors.New("failed to enable device")
 	}
 
 	zk.disabled = false
@@ -196,7 +210,7 @@ func (zk *ZK) DisableDevice() error {
 	}
 
 	if !res.Status {
-		return errors.New("Failed to disable device")
+		return errors.New("failed to disable device")
 	}
 
 	zk.disabled = true
@@ -231,7 +245,7 @@ func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 	attendances := []*Attendance{}
 
 	if recordSize == 8 || recordSize == 16 {
-		return nil, errors.New("Sorry I don't support this kind of device. I'm lazy")
+		return nil, errors.New("sorry I don't support this kind of device. I'm lazy")
 
 	}
 
@@ -282,7 +296,7 @@ func (zk *ZK) GetUsers() error {
 
 func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 	if zk.capturing != nil {
-		return nil, errors.New("Is capturing")
+		return nil, errors.New("is capturing")
 	}
 
 	if err := zk.GetUsers(); err != nil {

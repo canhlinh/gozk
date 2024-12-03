@@ -15,7 +15,7 @@ GOZK is a library to help gopher interact with ZK fingerprint machine
 Get source: ```go get github.com/canhlinh/gozk```
 
 Sample:
-```
+```golang
 package main
 
 import (
@@ -64,5 +64,14 @@ func gracefulQuit(f func()) {
 	for {
 		time.Sleep(10 * time.Second) // or runtime.Gosched() or similar per @misterbee
 	}
+}
+```
+
+Unlock sample
+```golang
+func Unlock(zk *ZK){
+	zk.DisableDevice();
+	zk.Unlock(3);
+	zk.EnableDevice();
 }
 ```
