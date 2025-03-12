@@ -2,14 +2,22 @@ package gozk
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"time"
 )
 
-func (zk *ZK) readSize() (int, error) {
+type ZKProperties struct {
+	RecordCap    int
+	TotalRecords int
+	UserCap      int
+	TotalUsers   int
+	FingerCap    int
+	TotalFingers int
+}
+
+func (zk *ZK) GetProperties() (*ZKProperties, error) {
 	if _, err := zk.sendCommand(CMD_GET_FREE_SIZES, nil, 1024); err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if len(zk.lastData) >= 80 {
@@ -18,12 +26,23 @@ func (zk *ZK) readSize() (int, error) {
 			pad = append(pad, "i")
 		}
 		zk.lastData = zk.lastData[:80]
-		return mustUnpack(pad, zk.lastData)[8].(int), nil
+		data, err := unpack(pad, zk.lastData)
+		if err != nil {
+			return nil, err
+		}
+		return &ZKProperties{
+			TotalUsers:   data[4].(int),
+			TotalFingers: data[6].(int),
+			TotalRecords: data[8].(int),
+			FingerCap:    data[14].(int),
+			UserCap:      data[15].(int),
+			RecordCap:    data[16].(int),
+		}, nil
 	} else if len(zk.lastData) >= 12 {
-		fmt.Println("Got length 12")
+		return nil, errors.New("Failed to read data")
 	}
 
-	return 0, nil
+	return nil, errors.New("Failed to read data")
 }
 
 func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {

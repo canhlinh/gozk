@@ -177,8 +177,17 @@ func makeCommKey(key, sessionID int, ticks int) ([]byte, error) {
 	return pack, nil
 }
 
-func mustUnpack(pad []string, data []byte) []interface{} {
+func unpack(pad []string, data []byte) ([]interface{}, error) {
 	value, err := newBP().UnPack(pad, data)
+	if err != nil {
+		return nil, err
+	}
+
+	return value, nil
+}
+
+func mustUnpack(pad []string, data []byte) []interface{} {
+	value, err := unpack(pad, data)
 	if err != nil {
 		panic(err)
 	}

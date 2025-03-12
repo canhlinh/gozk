@@ -33,6 +33,7 @@ type ZK struct {
 	lastData  []byte
 	disabled  bool
 	capturing chan bool
+	recordCap int
 }
 
 func NewZK(host string, port int, pin int, timezone string) *ZK {
@@ -203,13 +204,13 @@ func (zk *ZK) DisableDevice() error {
 	return nil
 }
 
-// GetAttendances returns a list of attendances
+// GetAttendances returns total attendances from the connected device
 func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 	if err := zk.GetUsers(); err != nil {
 		return nil, err
 	}
 
-	records, err := zk.readSize()
+	properties, err := zk.GetProperties()
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +228,7 @@ func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 	data = data[4:]
 
 	totalSize := mustUnpack([]string{"I"}, totalSizeByte)[0].(int)
-	recordSize := totalSize / records
+	recordSize := totalSize / properties.TotalRecords
 	attendances := []*Attendance{}
 
 	if recordSize == 8 || recordSize == 16 {
@@ -263,11 +264,6 @@ func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 // For now, just run this func. I'll implement this function later on.
 func (zk *ZK) GetUsers() error {
 
-	_, err := zk.readSize()
-	if err != nil {
-		return err
-	}
-
 	_, size, err := zk.readWithBuffer(CMD_USERTEMP_RRQ, FCT_USER, 0)
 	if err != nil {
 		return err
@@ -282,21 +278,15 @@ func (zk *ZK) GetUsers() error {
 
 func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 	if zk.capturing != nil {
-		return nil, errors.New("Is capturing")
+		return nil, errors.New("already capturing")
 	}
 
-	if err := zk.GetUsers(); err != nil {
-		return nil, err
+	if zk.disabled {
+		return nil, errors.New("device is disabled")
 	}
 
 	if err := zk.verifyUser(); err != nil {
 		return nil, err
-	}
-
-	if zk.disabled {
-		if err := zk.EnableDevice(); err != nil {
-			return nil, err
-		}
 	}
 
 	if err := zk.regEvent(EF_ATTLOG); err != nil {
