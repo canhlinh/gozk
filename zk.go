@@ -277,33 +277,30 @@ func (zk *ZK) GetUsers() error {
 	return nil
 }
 
-func (zk *ZK) LiveCapture() (chan *ScanEvent, error) {
+func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 	if zk.capturing != nil {
-		return nil, errors.New("already capturing")
+		return errors.New("already capturing")
 	}
 
 	if zk.disabled {
-		return nil, errors.New("device is disabled")
+		return errors.New("device is disabled")
 	}
 
 	if err := zk.verifyUser(); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := zk.regEvent(EF_ATTLOG); err != nil {
-		return nil, err
+		return err
 	}
 
 	log4go.Info("Start capturing")
 	zk.capturing = make(chan bool, 1)
-	c := make(chan *ScanEvent, 1)
-
 	go func() {
 
 		defer func() {
 			log4go.Info("Stopped capturing")
 			zk.regEvent(0)
-			close(c)
 		}()
 
 		for {
@@ -360,7 +357,7 @@ func (zk *ZK) LiveCapture() (chan *ScanEvent, error) {
 						continue
 					}
 
-					c <- &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
+					outerChan <- &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
 					log.Printf("UserID %v timestampe %v \n", userID, timestamp)
 				}
 			}
@@ -368,10 +365,10 @@ func (zk *ZK) LiveCapture() (chan *ScanEvent, error) {
 
 	}()
 
-	return c, nil
+	return nil
 }
 
-func (zk ZK) StopCapture() {
+func (zk ZK) StopCapturing() {
 	zk.capturing <- false
 }
 

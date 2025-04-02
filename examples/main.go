@@ -25,10 +25,18 @@ func main() {
 	fmt.Printf("User Capacity: %d\n", properties.UserCap)
 	fmt.Printf("Record Capacity: %d\n", properties.RecordCap)
 
-	events, err := zk.GetAllScannedEvents()
-	if err != nil {
+	if events, err := zk.GetAllScannedEvents(); err != nil {
+		panic(err)
+	} else {
+		fmt.Printf("Total Events: %d\n", len(events))
+	}
+
+	c := make(chan *gozk.ScanEvent)
+	if err := zk.StartCapturing(c); err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Total Events: %d\n", len(events))
+	for event := range c {
+		fmt.Printf("Event: %s\n", event.String())
+	}
 }

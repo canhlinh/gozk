@@ -23,6 +23,10 @@ type ScanEvent struct {
 	Timestamp time.Time // The time when the event was scanned
 }
 
+func (event ScanEvent) String() string {
+	return fmt.Sprintf("device_id:%s user_id:%d ts:%v", event.DeviceID, event.UserID, event.Timestamp.Format(time.RFC3339))
+}
+
 func (r Response) String() string {
 	return fmt.Sprintf("Status %v Code %d", r.Status, r.Code)
 }
