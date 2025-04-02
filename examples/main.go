@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	zk := gozk.NewZK("192.168.100.201", 4370, 0, gozk.DefaultTimezone)
+	zk := gozk.NewZK("", "192.168.100.201", 4370, 0, gozk.DefaultTimezone)
 	if err := zk.Connect(); err != nil {
 		panic(err)
 	}
@@ -25,10 +25,10 @@ func main() {
 	fmt.Printf("User Capacity: %d\n", properties.UserCap)
 	fmt.Printf("Record Capacity: %d\n", properties.RecordCap)
 
-	attendances, err := zk.GetAttendances()
+	events, err := zk.GetAllScannedEvents()
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Attendances: %d\n", len(attendances))
+	fmt.Printf("Total Events: %d\n", len(events))
 }

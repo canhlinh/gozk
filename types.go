@@ -17,9 +17,10 @@ type Response struct {
 type User struct {
 }
 
-type Attendance struct {
-	UserID     int64
-	AttendedAt time.Time
+type ScanEvent struct {
+	DeviceID  string    // An unique identifier for the device
+	UserID    int64     // An unique identifier for the user
+	Timestamp time.Time // The time when the event was scanned
 }
 
 func (r Response) String() string {

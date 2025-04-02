@@ -33,11 +33,12 @@ type ZK struct {
 	lastData  []byte
 	disabled  bool
 	capturing chan bool
-	recordCap int
+	deviceID  string
 }
 
-func NewZK(host string, port int, pin int, timezone string) *ZK {
+func NewZK(deviceID string, host string, port int, pin int, timezone string) *ZK {
 	return &ZK{
+		deviceID:  deviceID,
 		host:      host,
 		port:      port,
 		pin:       pin,
@@ -49,7 +50,7 @@ func NewZK(host string, port int, pin int, timezone string) *ZK {
 
 func (zk *ZK) Connect() error {
 	if zk.conn != nil {
-		return errors.New("Already connected")
+		return errors.New("already connected")
 	}
 
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", zk.host, zk.port), 3*time.Second)
@@ -158,7 +159,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 // Disconnect disconnects out of the machine fingerprint
 func (zk *ZK) Disconnect() error {
 	if zk.conn == nil {
-		return errors.New("Already disconnected")
+		return errors.New("already disconnected")
 	}
 
 	if _, err := zk.sendCommand(CMD_EXIT, nil, 8); err != nil {
@@ -182,7 +183,7 @@ func (zk *ZK) EnableDevice() error {
 	}
 
 	if !res.Status {
-		return errors.New("Failed to enable device")
+		return errors.New("failed to enable device")
 	}
 
 	zk.disabled = false
@@ -197,15 +198,15 @@ func (zk *ZK) DisableDevice() error {
 	}
 
 	if !res.Status {
-		return errors.New("Failed to disable device")
+		return errors.New("failed to disable device")
 	}
 
 	zk.disabled = true
 	return nil
 }
 
-// GetAttendances returns total attendances from the connected device
-func (zk *ZK) GetAttendances() ([]*Attendance, error) {
+// GetAllScannedEvents returns total attendances from the connected device
+func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 	if err := zk.GetUsers(); err != nil {
 		return nil, err
 	}
@@ -221,7 +222,7 @@ func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 	}
 
 	if size < 4 {
-		return []*Attendance{}, nil
+		return []*ScanEvent{}, nil
 	}
 
 	totalSizeByte := data[:4]
@@ -229,10 +230,10 @@ func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 
 	totalSize := mustUnpack([]string{"I"}, totalSizeByte)[0].(int)
 	recordSize := totalSize / properties.TotalRecords
-	attendances := []*Attendance{}
+	attendances := []*ScanEvent{}
 
 	if recordSize == 8 || recordSize == 16 {
-		return nil, errors.New("Sorry I don't support this kind of device. I'm lazy")
+		return nil, errors.New("sorry but I'm too lazy to implement this")
 
 	}
 
@@ -253,7 +254,7 @@ func (zk *ZK) GetAttendances() ([]*Attendance, error) {
 			return nil, err
 		}
 
-		attendances = append(attendances, &Attendance{AttendedAt: timestamp, UserID: userID})
+		attendances = append(attendances, &ScanEvent{DeviceID: zk.deviceID, Timestamp: timestamp, UserID: userID})
 		data = data[40:]
 	}
 
@@ -276,7 +277,7 @@ func (zk *ZK) GetUsers() error {
 	return nil
 }
 
-func (zk *ZK) LiveCapture() (chan *Attendance, error) {
+func (zk *ZK) LiveCapture() (chan *ScanEvent, error) {
 	if zk.capturing != nil {
 		return nil, errors.New("already capturing")
 	}
@@ -295,7 +296,7 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 
 	log4go.Info("Start capturing")
 	zk.capturing = make(chan bool, 1)
-	c := make(chan *Attendance, 1)
+	c := make(chan *ScanEvent, 1)
 
 	go func() {
 
@@ -359,7 +360,7 @@ func (zk *ZK) LiveCapture() (chan *Attendance, error) {
 						continue
 					}
 
-					c <- &Attendance{UserID: userID, AttendedAt: timestamp}
+					c <- &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
 					log.Printf("UserID %v timestampe %v \n", userID, timestamp)
 				}
 			}
