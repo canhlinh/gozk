@@ -311,7 +311,7 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 
 				data, err := zk.receiveData(1032, KeepAlivePeriod)
 				if err != nil && !strings.Contains(err.Error(), "timeout") {
-					log4go.Error(err)
+					outerChan <- &ScanEvent{Error: err}
 					return
 				}
 				if err := zk.ackOK(); err != nil {
@@ -319,7 +319,6 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 				}
 
 				if len(data) == 0 {
-					log4go.Info("Continue")
 					continue
 				}
 
@@ -328,7 +327,6 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 				data = data[16:]
 
 				if header[0].(int) != CMD_REG_EVENT {
-					log.Println("Skip REG EVENT")
 					continue
 				}
 
@@ -353,12 +351,12 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 
 					userID, err := strconv.ParseInt(strings.Replace(unpack[0].(string), "\x00", "", -1), 10, 64)
 					if err != nil {
-						log.Println(err)
+						outerChan <- &ScanEvent{Error: err}
 						continue
 					}
-
-					outerChan <- &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
-					log.Printf("UserID %v timestampe %v \n", userID, timestamp)
+					event := &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
+					outerChan <- event
+					log.Println("[Event]", event.String())
 				}
 			}
 		}

@@ -37,6 +37,10 @@ func main() {
 	}
 
 	for event := range c {
+		if event.Error != nil {
+			fmt.Printf("Error: %s\n", event.Error.Error())
+			continue
+		}
 		fmt.Printf("Event: %s\n", event.String())
 	}
 }

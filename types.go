@@ -21,6 +21,7 @@ type ScanEvent struct {
 	DeviceID  string    // An unique identifier for the device
 	UserID    int64     // An unique identifier for the user
 	Timestamp time.Time // The time when the event was scanned
+	Error     error     // An error if the event is invalid
 }
 
 func (event ScanEvent) String() string {
