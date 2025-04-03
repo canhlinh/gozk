@@ -298,7 +298,7 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 	zk.capturing = make(chan bool, 1)
 
 	onConnectionError := func(err error) {
-		outerChan <- &ScanEvent{Error: err}
+		outerChan <- &ScanEvent{DeviceID: zk.deviceID, Error: err}
 	}
 
 	go func() {
