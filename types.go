@@ -25,7 +25,7 @@ type ScanEvent struct {
 }
 
 func (event ScanEvent) String() string {
-	return fmt.Sprintf("device_id:%s user_id:%d ts:%v", event.DeviceID, event.UserID, event.Timestamp.Format(time.RFC3339))
+	return fmt.Sprintf("device_id:%s user_id:%d at:%v", event.DeviceID, event.UserID, event.Timestamp.Format(time.RFC3339))
 }
 
 func (r Response) String() string {

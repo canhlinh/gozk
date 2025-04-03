@@ -4,13 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/canhlinh/log4go"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -18,7 +17,7 @@ const (
 )
 
 var (
-	KeepAlivePeriod   = time.Second * 60
+	KeepAlivePeriod   = time.Second * 10
 	ReadSocketTimeout = 3 * time.Second
 )
 
@@ -88,7 +87,7 @@ func (zk *ZK) Connect() error {
 		}
 	}
 
-	log.Println("Connected with session_id", zk.sessionID)
+	logrus.Info("Connected to the device with session_id:", zk.sessionID)
 	return nil
 }
 
@@ -161,6 +160,7 @@ func (zk *ZK) Disconnect() error {
 	if zk.conn == nil {
 		return errors.New("already disconnected")
 	}
+	defer logrus.Info("Device has been disconnected")
 
 	if _, err := zk.sendCommand(CMD_EXIT, nil, 8); err != nil {
 		return err
@@ -294,12 +294,16 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 		return err
 	}
 
-	log4go.Info("Start capturing")
+	logrus.Info("Start capturing device_id:", zk.deviceID)
 	zk.capturing = make(chan bool, 1)
-	go func() {
 
+	onConnectionError := func(err error) {
+		outerChan <- &ScanEvent{Error: err}
+	}
+
+	go func() {
 		defer func() {
-			log4go.Info("Stopped capturing")
+			logrus.Info("Stopped capturing")
 			zk.regEvent(0)
 		}()
 
@@ -308,13 +312,21 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 			case <-zk.capturing:
 				return
 			default:
-
 				data, err := zk.receiveData(1032, KeepAlivePeriod)
-				if err != nil && !strings.Contains(err.Error(), "timeout") {
-					outerChan <- &ScanEvent{Error: err}
-					return
+				if err != nil {
+					if !strings.Contains(err.Error(), "timeout") {
+						onConnectionError(err)
+						return
+					}
+					if _, err := zk.GetFirmwareVersion(); err != nil {
+						onConnectionError(err)
+						return
+					}
+					continue
 				}
+
 				if err := zk.ackOK(); err != nil {
+					onConnectionError(err)
 					return
 				}
 
@@ -351,12 +363,12 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 
 					userID, err := strconv.ParseInt(strings.Replace(unpack[0].(string), "\x00", "", -1), 10, 64)
 					if err != nil {
-						outerChan <- &ScanEvent{Error: err}
+						onConnectionError(err)
 						continue
 					}
 					event := &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
 					outerChan <- event
-					log.Println("[Event]", event.String())
+					logrus.Println("ScanEvent", event.String())
 				}
 			}
 		}
@@ -381,6 +393,19 @@ func (zk ZK) Clone() *ZK {
 	}
 }
 
+func (zk *ZK) GetFirmwareVersion() (string, error) {
+	zk.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	res, err := zk.sendCommand(CMD_GET_VERSION, nil, 1024)
+	if err != nil {
+		return "", err
+	}
+	if !res.Status {
+		return "", errors.New("can not get version")
+	}
+	return string(res.Data), nil
+
+}
+
 func (zk *ZK) GetTime() (time.Time, error) {
 	res, err := zk.sendCommand(CMD_GET_TIME, nil, 1032)
 	if err != nil {
@@ -395,7 +420,7 @@ func (zk *ZK) GetTime() (time.Time, error) {
 
 func (zk *ZK) SetTime(t time.Time) error {
 	truncatedTime := t.Truncate(time.Second)
-	log.Println("Set new time:", truncatedTime)
+	logrus.Info("Set new time:", truncatedTime)
 
 	commandString, err := newBP().Pack([]string{"I"}, []interface{}{zk.encodeTime(truncatedTime)})
 	if err != nil {

@@ -4,9 +4,14 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type ZKProperties struct {
+	ID           string
+	Clock        time.Time
+	Version      string
 	RecordCap    int
 	TotalRecords int
 	UserCap      int
@@ -15,7 +20,32 @@ type ZKProperties struct {
 	TotalFingers int
 }
 
+func (properties ZKProperties) Println() {
+	logrus.Println("--------------DEVICE INFORMATION--------------")
+	logrus.Println("Device ID:", properties.ID)
+	logrus.Println("Device Version:", properties.Version)
+	logrus.Println("Device Clock:", properties.Clock.Format(time.RFC3339))
+	logrus.Println("Total Users:", properties.TotalUsers)
+	logrus.Println("Total Fingers:", properties.TotalFingers)
+	logrus.Println("Total Records:", properties.TotalRecords)
+	logrus.Println("Finger Capacity:", properties.FingerCap)
+	logrus.Println("User Capacity:", properties.UserCap)
+	logrus.Println("Record Capacity:", properties.RecordCap)
+	logrus.Println("------------------------------------------------")
+}
+
 func (zk *ZK) GetProperties() (*ZKProperties, error) {
+
+	version, err := zk.GetFirmwareVersion()
+	if err != nil {
+		return nil, err
+	}
+
+	clock, err := zk.GetTime()
+	if err != nil {
+		return nil, err
+	}
+
 	if _, err := zk.sendCommand(CMD_GET_FREE_SIZES, nil, 1024); err != nil {
 		return nil, err
 	}
@@ -31,6 +61,9 @@ func (zk *ZK) GetProperties() (*ZKProperties, error) {
 			return nil, err
 		}
 		return &ZKProperties{
+			ID:           zk.deviceID,
+			Version:      version,
+			Clock:        clock,
 			TotalUsers:   data[4].(int),
 			TotalFingers: data[6].(int),
 			TotalRecords: data[8].(int),
@@ -39,10 +72,10 @@ func (zk *ZK) GetProperties() (*ZKProperties, error) {
 			RecordCap:    data[16].(int),
 		}, nil
 	} else if len(zk.lastData) >= 12 {
-		return nil, errors.New("Failed to read data")
+		return nil, errors.New("failed to read data")
 	}
 
-	return nil, errors.New("Failed to read data")
+	return nil, errors.New("failed to read data")
 }
 
 func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
@@ -139,25 +172,35 @@ func (zk *ZK) receiveRawData(size int) ([]byte, error) {
 	return data, nil
 }
 
+func (zk *ZK) tryReadChunk(start, size int) ([]byte, error) {
+	commandString, err := newBP().Pack([]string{"i", "i"}, []interface{}{start, size})
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := zk.sendCommand(CMD_READ_BUFFER, commandString, size+32)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := zk.receiveChunk(res.Code, res.TCPLength)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
 func (zk *ZK) readChunk(start, size int) ([]byte, error) {
 
 	for i := 0; i < 3; i++ {
-		commandString, err := newBP().Pack([]string{"i", "i"}, []interface{}{start, size})
+		data, err := zk.tryReadChunk(start, size)
 		if err != nil {
 			return nil, err
 		}
-
-		res, err := zk.sendCommand(CMD_READ_BUFFER, commandString, size+32)
-		if err != nil {
-			return nil, err
+		if len(data) > 0 {
+			return data, nil
 		}
-
-		data, err := zk.receiveChunk(res.Code, res.TCPLength)
-		if err != nil {
-			return nil, err
-		}
-
-		return data, nil
 	}
 
 	return nil, errors.New("can't read chunk")
@@ -184,7 +227,7 @@ func (zk *ZK) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
 			return nil, err
 		}
 
-		dataReceived := []byte{}
+		var dataReceived []byte
 		if len(zk.lastData) >= 8+size {
 			dataReceived = zk.lastData[8:]
 		} else {
@@ -209,6 +252,10 @@ func (zk *ZK) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
 		}
 
 		unpack, err := newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
+		if err != nil {
+			return nil, err
+		}
+
 		resCode := unpack[0].(int)
 
 		if resCode == CMD_ACK_OK {
@@ -217,7 +264,7 @@ func (zk *ZK) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
 
 		return []byte{}, nil
 	default:
-		return nil, errors.New("Invalid reponse")
+		return nil, errors.New("invalid response")
 	}
 
 }
@@ -242,7 +289,7 @@ func (zk *ZK) receiveTCPData(packet []byte, size int) ([]byte, []byte, error) {
 	data := []byte{}
 
 	if tcplength <= 0 {
-		return nil, data, errors.New("Incorrect tcp packet")
+		return nil, data, errors.New("incorrect tcp packet")
 	}
 
 	if n := (tcplength - 8); n < size {
@@ -274,7 +321,7 @@ func (zk *ZK) receiveTCPData(packet []byte, size int) ([]byte, []byte, error) {
 			return packet[16 : size+16], packet[size+16:], nil
 		}
 
-		return nil, nil, errors.New("Incorrect response")
+		return nil, nil, errors.New("incorrect response")
 	}
 
 	if packetSize > size+16 {
@@ -333,7 +380,7 @@ func (zk *ZK) verifyUser() error {
 	}
 
 	if !res.Status {
-		return errors.New("Can't verify")
+		return errors.New("can't verify")
 	}
 
 	return nil
@@ -352,14 +399,14 @@ func (zk *ZK) regEvent(flag int) error {
 	}
 
 	if !res.Status {
-		return errors.New("Can't reg event")
+		return errors.New("can't reg event")
 	}
-
 	return nil
 }
 
 func (zk *ZK) receiveData(size int, timeout time.Duration) ([]byte, error) {
 	data := make([]byte, size)
+	defer zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
 
 	zk.conn.SetReadDeadline(time.Now().Add(timeout))
 	n, err := zk.conn.Read(data)
@@ -368,7 +415,7 @@ func (zk *ZK) receiveData(size int, timeout time.Duration) ([]byte, error) {
 	}
 
 	if n == 0 {
-		return nil, errors.New("Failed to received DATA")
+		return nil, errors.New("failed to received DATA")
 	}
 
 	return data[:n], nil
@@ -388,7 +435,7 @@ func (zk *ZK) ackOK() error {
 	if n, err := zk.conn.Write(top); err != nil {
 		return err
 	} else if n == 0 {
-		return errors.New("Failed to write command")
+		return errors.New("failed to write command")
 	}
 
 	return nil
