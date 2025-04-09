@@ -163,7 +163,7 @@ func makeCommKey(key, sessionID int, ticks int) ([]byte, error) {
 	})
 
 	unpack = mustUnpack([]string{"H", "H"}, pack)
-	pack, _ = newBP().Pack([]string{"H", "H"}, []interface{}{unpack[0], unpack[1]})
+	pack, _ = newBP().Pack([]string{"H", "H"}, []interface{}{unpack[1], unpack[0]})
 
 	b := 0xff & ticks
 	unpack = mustUnpack([]string{"B", "B", "B", "B"}, pack)
