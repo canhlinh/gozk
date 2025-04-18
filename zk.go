@@ -316,18 +316,18 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 				if err != nil {
 					if !strings.Contains(err.Error(), "timeout") {
 						onConnectionError(err)
-						return
+						continue
 					}
 					if _, err := zk.GetFirmwareVersion(); err != nil {
 						onConnectionError(err)
-						return
+						continue
 					}
 					continue
 				}
 
 				if err := zk.ackOK(); err != nil {
 					onConnectionError(err)
-					return
+					continue
 				}
 
 				if len(data) == 0 {
