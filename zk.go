@@ -258,7 +258,6 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 	if recordSize == 8 || recordSize == 16 {
 		return nil, errors.New("sorry but I'm too lazy to implement this")
 	}
-	fmt.Println(len(data))
 
 	for len(data) >= 40 {
 

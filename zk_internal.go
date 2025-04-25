@@ -102,7 +102,6 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 				if err != nil {
 					return nil, 0, err
 				}
-
 				data := append(zk.lastData, moreData...)
 				return data, len(data), nil
 			}
@@ -111,8 +110,6 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 			return zk.lastData, len(zk.lastData), nil
 		}
 	}
-
-	fmt.Println("length of data:", len(zk.lastData))
 
 	sizeUnpack, err := newBP().UnPack([]string{"I"}, zk.lastData[1:5])
 	if err != nil {
@@ -123,11 +120,11 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 	remain := size % zk.maxChunk
 	packets := (size - remain) / zk.maxChunk
 
+	fmt.Println("size:", size, "packets:", packets, "remain:", remain)
 	data := []byte{}
 	start := 0
 
 	for i := 0; i < packets; i++ {
-
 		d, err := zk.readChunk(start, zk.maxChunk)
 		if err != nil {
 			return nil, 0, err
