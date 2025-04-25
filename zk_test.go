@@ -17,13 +17,13 @@ const (
 )
 
 func TestSocketConnect(t *testing.T) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK("", TCP, testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(t, socket.Connect())
 	require.NoError(t, socket.Disconnect())
 }
 
 func TestSocketGetAttendances(t *testing.T) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK("", TCP, testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(t, socket.Connect())
 	require.NoError(t, socket.DisableDevice())
 
@@ -37,14 +37,14 @@ func TestSocketGetAttendances(t *testing.T) {
 }
 
 func TestSocketGetUsers(t *testing.T) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK("", TCP, testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(t, socket.Connect())
 	defer socket.Disconnect()
 	require.NoError(t, socket.GetUsers())
 }
 
 func BenchmarkSocketGetAttendances(b *testing.B) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK("", TCP, testZkHost, testZkPort, 0, testTimezone)
 	require.NoError(b, socket.Connect())
 	defer socket.Disconnect()
 

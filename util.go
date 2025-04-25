@@ -3,6 +3,7 @@ package gozk
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
 	"time"
 
 	binarypack "github.com/canhlinh/go-binary-pack"
@@ -206,4 +207,56 @@ func getDataSize(rescode int, data []byte) (int, error) {
 	}
 
 	return 0, nil
+}
+
+func newTCPConnection(host string, port int) (*net.TCPConn, error) {
+	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", host, port))
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := net.DialTCP("tcp", nil, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := conn.SetKeepAlive(true); err != nil {
+		return nil, err
+	}
+
+	if err := conn.SetKeepAlivePeriod(KeepAlivePeriod); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+func newUDPConnection(host string, port int) (*net.UDPConn, error) {
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, port))
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := net.DialUDP("udp", nil, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
+}
+
+func newSocketConnection(protocol Protocol, host string, port int) (net.Conn, error) {
+	switch protocol {
+	case TCP:
+		return newTCPConnection(host, port)
+	case UDP:
+		return newUDPConnection(host, port)
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+}
+
+func ljust(data []byte, len int) []byte {
+	result := make([]byte, len)
+	copy(result, data)
+	return result
 }

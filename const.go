@@ -1,8 +1,8 @@
 package gozk
 
 const (
-	USHRT_MAX = 65535
-	MAX_CHUNK = 0xFFc0
+	USHRT_MAX     = 65535
+	MAX_TCP_CHUNK = 0xFFc0
 
 	CMD_DB_RRQ          = 7  // Read in some kind of data from the machine
 	CMD_USER_WRQ        = 8  // Upload the user information (from PC to terminal).
@@ -52,27 +52,28 @@ const (
 	CMD_SET_TIME  = 202 // Set machines time
 	CMD_REG_EVENT = 500 // Register the event
 
-	CMD_CONNECT       = 1000 // Connections requests
-	CMD_EXIT          = 1001 // Disconnection requests
-	CMD_ENABLEDEVICE  = 1002 // Ensure the machine to be at the normal work condition
-	CMD_DISABLEDEVICE = 1003 // Make the machine to be at the shut-down condition, generally demonstrates ‘in the work ...’on LCD
-	CMD_RESTART       = 1004 // Restart the machine.
-	CMD_POWEROFF      = 1005 // Shut-down power source
-	CMD_SLEEP         = 1006 // Ensure the machine to be at the idle state.
-	CMD_RESUME        = 1007 // Awakens the sleep machine (temporarily not to support)
-	CMD_CAPTUREFINGER = 1009 // Captures fingerprints picture
-	CMD_TEST_TEMP     = 1011 // Test some fingerprint exists or does not
-	CMD_CAPTUREIMAGE  = 1012 // Capture the entire image
-	CMD_REFRESHDATA   = 1013 // Refresh the machine interior data
-	CMD_REFRESHOPTION = 1014 // Refresh the configuration parameter
-	CMD_TESTVOICE     = 1017 // Play voice
-	CMD_GET_VERSION   = 1100 // Obtain the firmware edition
-	CMD_CHANGE_SPEED  = 1101 // Change transmission speed
-	CMD_AUTH          = 1102 // Connections authorizations
-	CMD_PREPARE_DATA  = 1500 // Prepares to transmit the data
-	CMD_DATA          = 1501 // Transmit a data packet
-	CMD_FREE_DATA     = 1502 // Clear machines opened buffer
-	CMD_READ_BUFFER   = 1504 // Read buffer
+	CMD_CONNECT        = 1000 // Connections requests
+	CMD_EXIT           = 1001 // Disconnection requests
+	CMD_ENABLEDEVICE   = 1002 // Ensure the machine to be at the normal work condition
+	CMD_DISABLEDEVICE  = 1003 // Make the machine to be at the shut-down condition, generally demonstrates ‘in the work ...’on LCD
+	CMD_RESTART        = 1004 // Restart the machine.
+	CMD_POWEROFF       = 1005 // Shut-down power source
+	CMD_SLEEP          = 1006 // Ensure the machine to be at the idle state.
+	CMD_RESUME         = 1007 // Awakens the sleep machine (temporarily not to support)
+	CMD_CAPTUREFINGER  = 1009 // Captures fingerprints picture
+	CMD_TEST_TEMP      = 1011 // Test some fingerprint exists or does not
+	CMD_CAPTUREIMAGE   = 1012 // Capture the entire image
+	CMD_REFRESHDATA    = 1013 // Refresh the machine interior data
+	CMD_REFRESHOPTION  = 1014 // Refresh the configuration parameter
+	CMD_TESTVOICE      = 1017 // Play voice
+	CMD_GET_VERSION    = 1100 // Obtain the firmware edition
+	CMD_CHANGE_SPEED   = 1101 // Change transmission speed
+	CMD_AUTH           = 1102 // Connections authorizations
+	CMD_PREPARE_DATA   = 1500 // Prepares to transmit the data
+	CMD_DATA           = 1501 // Transmit a data packet
+	CMD_FREE_DATA      = 1502 // Clear machines opened buffer
+	CMD_PREPARE_BUFFER = 1503 // initialize buffer for partial reads!
+	CMD_READ_BUFFER    = 1504 // Read buffer
 
 	CMD_ACK_OK     = 2000 // Return value for order perform successfully
 	CMD_ACK_ERROR  = 2001 // Return value for order perform failed

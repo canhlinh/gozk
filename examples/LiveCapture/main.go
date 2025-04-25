@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	zk := gozk.NewZK("AWZSOME", "192.168.100.201", 4370, 0, gozk.DefaultTimezone)
+	zk := gozk.NewZK("AWZSOME", gozk.TCP, "192.168.100.201", 4370, 0, gozk.DefaultTimezone)
 	if err := zk.Connect(); err != nil {
 		panic(err)
 	}
@@ -19,12 +19,6 @@ func main() {
 		panic(err)
 	}
 	properties.Println()
-
-	if events, err := zk.GetAllScannedEvents(); err != nil {
-		panic(err)
-	} else {
-		fmt.Printf("Total Events: %d\n", len(events))
-	}
 
 	c := make(chan *gozk.ScanEvent)
 	if err := zk.StartCapturing(c); err != nil {

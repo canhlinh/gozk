@@ -2,6 +2,7 @@ package gozk
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -84,7 +85,7 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 		return nil, 0, err
 	}
 
-	res, err := zk.sendCommand(1503, commandString, 1024)
+	res, err := zk.sendCommand(CMD_PREPARE_BUFFER, commandString, 1024)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -94,19 +95,24 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 	}
 
 	if res.Code == CMD_DATA {
+		switch zk.protocol {
+		case TCP:
+			if need := res.TCPLength - 8 - len(zk.lastData); need > 0 {
+				moreData, err := zk.receiveRawData(need)
+				if err != nil {
+					return nil, 0, err
+				}
 
-		if need := res.TCPLength - 8 - len(zk.lastData); need > 0 {
-			moreData, err := zk.receiveRawData(need)
-			if err != nil {
-				return nil, 0, err
+				data := append(zk.lastData, moreData...)
+				return data, len(data), nil
 			}
-
-			data := append(zk.lastData, moreData...)
-			return data, len(data), nil
+			return zk.lastData, len(zk.lastData), nil
+		case UDP:
+			return zk.lastData, len(zk.lastData), nil
 		}
-
-		return zk.lastData, len(zk.lastData), nil
 	}
+
+	fmt.Println("length of data:", len(zk.lastData))
 
 	sizeUnpack, err := newBP().UnPack([]string{"I"}, zk.lastData[1:5])
 	if err != nil {
@@ -114,20 +120,20 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 	}
 
 	size := sizeUnpack[0].(int)
-	remain := size % MAX_CHUNK
-	packets := (size - remain) / MAX_CHUNK
+	remain := size % zk.maxChunk
+	packets := (size - remain) / zk.maxChunk
 
 	data := []byte{}
 	start := 0
 
 	for i := 0; i < packets; i++ {
 
-		d, err := zk.readChunk(start, MAX_CHUNK)
+		d, err := zk.readChunk(start, zk.maxChunk)
 		if err != nil {
 			return nil, 0, err
 		}
 		data = append(data, d...)
-		start += MAX_CHUNK
+		start += zk.maxChunk
 	}
 
 	if remain > 0 {
@@ -177,8 +183,12 @@ func (zk *ZK) tryReadChunk(start, size int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	responseSize := size + 32
+	if zk.protocol == UDP {
+		responseSize = 1024 + 8
+	}
 
-	res, err := zk.sendCommand(CMD_READ_BUFFER, commandString, size+32)
+	res, err := zk.sendCommand(CMD_READ_BUFFER, commandString, responseSize)
 	if err != nil {
 		return nil, err
 	}
@@ -207,62 +217,82 @@ func (zk *ZK) readChunk(start, size int) ([]byte, error) {
 }
 
 func (zk *ZK) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
-
 	switch responseCode {
 	case CMD_DATA:
-		if need := tcpLength - 8 - len(zk.lastData); need > 0 {
-			moreData, err := zk.receiveRawData(need)
-			if err != nil {
-				return nil, err
+		if zk.protocol == TCP {
+			if need := tcpLength - 8 - len(zk.lastData); need > 0 {
+				moreData, err := zk.receiveRawData(need)
+				if err != nil {
+					return nil, err
+				}
+				return append(zk.lastData, moreData...), nil
 			}
-			return append(zk.lastData, moreData...), nil
+			return zk.lastData, nil
+		} else {
+			return zk.lastData, nil
 		}
 
-		return zk.lastData, nil
 	case CMD_PREPARE_DATA:
-
 		data := []byte{}
 		size, err := getDataSize(responseCode, zk.lastData)
 		if err != nil {
 			return nil, err
 		}
 
-		var dataReceived []byte
-		if len(zk.lastData) >= 8+size {
-			dataReceived = zk.lastData[8:]
-		} else {
-			dataReceived = append(zk.lastData[8:], zk.mustReceiveData(size+32)...)
+		if zk.protocol == TCP {
+			var dataReceived []byte
+			if len(zk.lastData) >= 8+size {
+				dataReceived = zk.lastData[8:]
+			} else {
+				dataReceived = append(zk.lastData[8:], zk.mustReceiveData(size+32)...)
+			}
+			d, brokenHeader, err := zk.receiveTCPData(dataReceived, size)
+			if err != nil {
+				return nil, err
+			}
+			data = append(data, d...)
+
+			if len(brokenHeader) < 16 {
+				dataReceived = append(brokenHeader, zk.mustReceiveData(16)...)
+			} else {
+				dataReceived = brokenHeader
+			}
+
+			if n := 16 - len(dataReceived); n > 0 {
+				dataReceived = append(dataReceived, zk.mustReceiveData(n)...)
+			}
+
+			unpack, err := newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
+			if err != nil {
+				return nil, err
+			}
+
+			resCode := unpack[0].(int)
+
+			if resCode == CMD_ACK_OK {
+				return data, nil
+			}
+
+			return []byte{}, nil
 		}
 
-		d, brokenHeader, err := zk.receiveTCPData(dataReceived, size)
-		if err != nil {
-			return nil, err
+		for {
+			dataReceived := make([]byte, 1024+8)
+			if _, err := zk.conn.Read(dataReceived); err != nil {
+				return nil, err
+			}
+			response := mustUnpack([]string{"H", "H", "H", "H"}, dataReceived[:8])[0].(int)
+			switch response {
+			case CMD_DATA:
+				data = append(data, dataReceived[8:]...)
+				size -= 1024
+			case CMD_ACK_OK:
+				return data, nil
+			default:
+				fmt.Println("data broken")
+				return data, nil
+			}
 		}
-
-		data = append(data, d...)
-
-		if len(brokenHeader) < 16 {
-			dataReceived = append(brokenHeader, zk.mustReceiveData(16)...)
-		} else {
-			dataReceived = brokenHeader
-		}
-
-		if n := 16 - len(dataReceived); n > 0 {
-			dataReceived = append(dataReceived, zk.mustReceiveData(n)...)
-		}
-
-		unpack, err := newBP().UnPack([]string{"H", "H", "H", "H"}, dataReceived[8:16])
-		if err != nil {
-			return nil, err
-		}
-
-		resCode := unpack[0].(int)
-
-		if resCode == CMD_ACK_OK {
-			return data, nil
-		}
-
-		return []byte{}, nil
 	default:
 		return nil, errors.New("invalid response")
 	}
