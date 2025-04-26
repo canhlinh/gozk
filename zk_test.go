@@ -46,13 +46,18 @@ func TestSocketGetUsers(t *testing.T) {
 	require.NoError(t, socket.GetUsers())
 }
 
-func BenchmarkSocketGetAttendances(b *testing.B) {
+func TestUnlockTheDoor(t *testing.T) {
 	socket := NewZK(testZkHost, WithTimezone(testTimezone), WithTCP(true))
-	require.NoError(b, socket.Connect())
+	require.NoError(t, socket.Connect())
 	defer socket.Disconnect()
 
-	for i := 0; i < b.N; i++ {
-		_, err := socket.GetAllScannedEvents()
-		require.NoError(b, err)
-	}
+	require.NoError(t, socket.UnlockTheDoor(3))
+}
+
+func TestWriteLCD(t *testing.T) {
+	socket := NewZK(testZkHost, WithTimezone(testTimezone), WithTCP(true))
+	require.NoError(t, socket.Connect())
+	defer socket.Disconnect()
+
+	require.NoError(t, socket.WriteLCD("Hello world"))
 }

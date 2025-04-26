@@ -196,6 +196,15 @@ func mustUnpack(pad []string, data []byte) []interface{} {
 	return value
 }
 
+func mustPack(pad []string, data []interface{}) []byte {
+	value, err := newBP().Pack(pad, data)
+	if err != nil {
+		panic(err)
+	}
+
+	return value
+}
+
 func getDataSize(rescode int, data []byte) (int, error) {
 	if rescode == CMD_PREPARE_DATA {
 		sizeUnpack, err := newBP().UnPack([]string{"I"}, data[:4])
