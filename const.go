@@ -3,6 +3,7 @@ package gozk
 const (
 	USHRT_MAX      = 65535
 	MAX_TCP_CHUNK  = 0xFFc0
+	MAX_UDP_CHUNK  = 16 * 1024
 	UDP_CHUNK_SIZE = 1024 + 8
 
 	CMD_DB_RRQ          = 7  // Read in some kind of data from the machine

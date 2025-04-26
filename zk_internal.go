@@ -2,7 +2,6 @@ package gozk
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 
 type ZKProperties struct {
 	ID           string
+	TCP          bool
 	Clock        time.Time
 	Version      string
 	RecordCap    int
@@ -32,6 +32,11 @@ func (properties ZKProperties) Println() {
 	logrus.Println("Finger Capacity:", properties.FingerCap)
 	logrus.Println("User Capacity:", properties.UserCap)
 	logrus.Println("Record Capacity:", properties.RecordCap)
+	if properties.TCP {
+		logrus.Println("Protocol: TCP")
+	} else {
+		logrus.Println("Protocol: UDP")
+	}
 	logrus.Println("------------------------------------------------")
 }
 
@@ -63,6 +68,7 @@ func (zk *ZK) GetProperties() (*ZKProperties, error) {
 		}
 		return &ZKProperties{
 			ID:           zk.deviceID,
+			TCP:          zk.tcp,
 			Version:      version,
 			Clock:        clock,
 			TotalUsers:   data[4].(int),
@@ -95,8 +101,7 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 	}
 
 	if res.Code == CMD_DATA {
-		switch zk.protocol {
-		case TCP:
+		if zk.tcp {
 			if need := res.TCPLength - 8 - len(res.Data); need > 0 {
 				moreData, err := zk.receiveRawData(need)
 				if err != nil {
@@ -106,9 +111,8 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 				return data, len(data), nil
 			}
 			return res.Data, len(res.Data), nil
-		case UDP:
-			return res.Data, len(res.Data), nil
 		}
+		return res.Data, len(res.Data), nil
 	}
 
 	sizeUnpack, err := newBP().UnPack([]string{"I"}, res.Data[1:5])
@@ -118,13 +122,10 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 
 	size := sizeUnpack[0].(int)
 	remain := size % zk.maxChunk
-	fmt.Printf("SIZE %d MAX_CHUNK %d REMAIN %d \n", size, zk.maxChunk, remain)
 	packets := (size - remain) / zk.maxChunk
 
-	fmt.Println("size:", size, "packets:", packets, "remain:", remain)
 	data := []byte{}
 	start := 0
-
 	for i := 0; i < packets; i++ {
 		chunk, err := zk.readChunk(start, zk.maxChunk)
 		if err != nil {
@@ -132,19 +133,15 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 		}
 		data = append(data, chunk...)
 		start += zk.maxChunk
-		fmt.Println("read chunk", i, "of", packets, "length", len(data))
 	}
 
 	if remain > 0 {
-		fmt.Printf("Remain before read chunk len:%d start:%d remain: %d\n", len(data), start, remain)
 		chunk, err := zk.readChunk(start, remain)
 		if err != nil {
 			return nil, 0, err
 		}
-		fmt.Println("chunk remain", len(chunk))
 		data = append(data, chunk...)
 		start += remain
-		fmt.Println("Remain After read chunk", "length", len(data))
 	}
 
 	if err := zk.freeData(); err != nil {
@@ -184,11 +181,10 @@ func (zk *ZK) tryReadChunk(start, size int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	responseSize := size + 32
-	if zk.protocol == UDP {
-		responseSize = UDP_CHUNK_SIZE
+	responseSize := UDP_CHUNK_SIZE
+	if zk.tcp {
+		responseSize = size + 8
 	}
-
 	res, err := zk.sendCommand(CMD_READ_BUFFER, commandString, responseSize)
 	if err != nil {
 		return nil, err
@@ -220,7 +216,7 @@ func (zk *ZK) readChunk(start, size int) ([]byte, error) {
 func (zk *ZK) receiveChunk(res *Response) ([]byte, error) {
 	switch res.Code {
 	case CMD_DATA:
-		if zk.protocol == TCP {
+		if zk.tcp {
 			if need := res.TCPLength - 8 - len(res.Data); need > 0 {
 				moreData, err := zk.receiveRawData(need)
 				if err != nil {
@@ -229,12 +225,11 @@ func (zk *ZK) receiveChunk(res *Response) ([]byte, error) {
 				return append(res.Data, moreData...), nil
 			}
 			return res.Data, nil
-		} else {
-			return res.Data, nil
 		}
+		return res.Data, nil
 
 	case CMD_PREPARE_DATA:
-		if zk.protocol == TCP {
+		if zk.tcp {
 			data := []byte{}
 			size, err := getDataSize(res.Code, res.Data)
 			if err != nil {
@@ -291,7 +286,6 @@ func (zk *ZK) receiveChunk(res *Response) ([]byte, error) {
 			case CMD_ACK_OK:
 				return data, nil
 			default:
-				fmt.Println("data broken")
 				return data, nil
 			}
 		}
@@ -460,8 +454,7 @@ func (zk *ZK) ackOK() error {
 		return err
 	}
 
-	switch zk.protocol {
-	case TCP:
+	if zk.tcp {
 		top, err := createTCPTop(buf)
 		if err != nil {
 			return err
@@ -469,14 +462,9 @@ func (zk *ZK) ackOK() error {
 		if _, err := zk.conn.Write(top); err != nil {
 			return err
 		}
-	case UDP:
-		if _, err := zk.conn.Write(buf); err != nil {
-			return err
-		}
-	default:
-		return nil
+	} else if _, err := zk.conn.Write(buf); err != nil {
+		return err
 	}
-
 	return nil
 }
 

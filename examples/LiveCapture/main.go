@@ -9,8 +9,8 @@ import (
 	"github.com/canhlinh/gozk"
 )
 
-func liveCapture(protocol gozk.Protocol) {
-	zk := gozk.NewZK("AWZSOME", protocol, "192.168.100.201", 4370, 0, gozk.DefaultTimezone)
+func liveCapture(tcp bool) {
+	zk := gozk.NewZK("192.168.100.201", gozk.WithTCP(tcp), gozk.WithTimezone(gozk.DefaultTimezone))
 	if err := zk.Connect(); err != nil {
 		panic(err)
 	}
@@ -37,8 +37,8 @@ func liveCapture(protocol gozk.Protocol) {
 }
 
 func main() {
-	// go liveCapture(gozk.TCP)
-	go liveCapture(gozk.UDP)
+	go liveCapture(true)
+	go liveCapture(false)
 
 	// Wait system interrupt signal
 

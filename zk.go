@@ -21,16 +21,9 @@ var (
 	ReadSocketTimeout = 3 * time.Second
 )
 
-type Protocol string
-
-const (
-	TCP Protocol = "tcp"
-	UDP Protocol = "udp"
-)
-
 type ZK struct {
 	conn      net.Conn
-	protocol  Protocol
+	tcp       bool
 	sessionID int
 	replyID   int
 	host      string
@@ -43,21 +36,18 @@ type ZK struct {
 	maxChunk  int
 }
 
-func NewZK(deviceID string, protocol Protocol, host string, port int, pin int, timezone string) *ZK {
-	maxChunk := MAX_TCP_CHUNK
-	if protocol == UDP {
-		maxChunk = 16 * 1024
-	}
+func NewZK(host string, opts ...Option) *ZK {
+	option := composeOption(opts...)
 	return &ZK{
-		deviceID:  deviceID,
-		protocol:  protocol,
-		host:      host,
-		port:      port,
-		pin:       pin,
-		loc:       LoadLocation(timezone),
 		sessionID: 0,
 		replyID:   USHRT_MAX - 1,
-		maxChunk:  maxChunk,
+		host:      host,
+		port:      option.port,
+		pin:       option.pin,
+		loc:       option.timezone,
+		deviceID:  option.deviceID,
+		tcp:       option.useTCP,
+		maxChunk:  option.maxChunk,
 	}
 }
 
@@ -65,7 +55,7 @@ func (zk *ZK) Connect() error {
 	if zk.conn != nil {
 		return errors.New("already connected")
 	}
-	conn, err := newSocketConnection(zk.protocol, zk.host, zk.port)
+	conn, err := newSocketConnection(zk.tcp, zk.host, zk.port)
 	if err != nil {
 		return err
 	}
@@ -107,8 +97,8 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 	var receivedHeader []interface{}
 	var tcpLength int
 	var data []byte
-	switch zk.protocol {
-	case TCP:
+
+	if zk.tcp {
 		top, err := createTCPTop(header)
 		if err != nil && err != io.EOF {
 			return nil, err
@@ -133,7 +123,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			return nil, err
 		}
 		data = tcpDataRecieved[16:bytesReceived]
-	case UDP:
+	} else {
 		if n, err := zk.conn.Write(header); err != nil {
 			return nil, err
 		} else if n == 0 {
@@ -151,8 +141,6 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			return nil, err
 		}
 		data = udpDataRecieved[8:]
-	default:
-		return nil, errors.New("Protocol unsupported")
 	}
 
 	resCode := receivedHeader[0].(int)
@@ -242,9 +230,6 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println("LENGHT of data", len(data), "size of data", size)
-
 	if size < 4 {
 		return []*ScanEvent{}, nil
 	}
@@ -255,7 +240,6 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 	totalSize := mustUnpack([]string{"I"}, totalSizeByte)[0].(int)
 	recordSize := totalSize / properties.TotalRecords
 
-	logrus.Debugf("Got recordSize:%d totalSize %d \n", recordSize, totalSize)
 	attendances := []*ScanEvent{}
 	if recordSize == 8 || recordSize == 16 {
 		return nil, errors.New("sorry but I'm too lazy to implement this")
@@ -274,7 +258,7 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 		}
 
 		userID, err := strconv.ParseInt(strings.Replace(v[1].(string), "\x00", "", -1), 10, 64)
-		if err == nil {
+		if err != nil {
 			return nil, err
 		}
 		attendances = append(attendances, &ScanEvent{DeviceID: zk.deviceID, Timestamp: timestamp, UserID: userID})
@@ -358,11 +342,10 @@ func (zk *ZK) StartCapturing(outerChan chan<- *ScanEvent) error {
 				}
 
 				var header []interface{}
-				switch zk.protocol {
-				case TCP:
+				if zk.tcp {
 					header = mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
 					data = data[16:]
-				case UDP:
+				} else {
 					header = mustUnpack([]string{"H", "H", "H", "H"}, data[:8])
 					data = data[8:]
 				}

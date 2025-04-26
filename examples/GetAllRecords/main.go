@@ -1,22 +1,23 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/canhlinh/gozk"
 	"github.com/sirupsen/logrus"
 )
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
-	GetAllScannedEvents(gozk.TCP)
-	GetAllScannedEvents(gozk.UDP)
+	GetAllScannedEvents(true)
+	GetAllScannedEvents(false)
 }
 
-func GetAllScannedEvents(protocol gozk.Protocol) {
-	zk := gozk.NewZK("AWZSOME", protocol, "192.168.100.201", 4370, 0, gozk.DefaultTimezone)
+func GetAllScannedEvents(tcp bool) {
+	zk := gozk.NewZK("192.168.100.201", gozk.WithTCP(tcp), gozk.WithTimezone(gozk.DefaultTimezone))
 	if err := zk.Connect(); err != nil {
 		panic(err)
 	}
-
 	defer zk.Disconnect()
 
 	properties, err := zk.GetProperties()
@@ -25,11 +26,12 @@ func GetAllScannedEvents(protocol gozk.Protocol) {
 	}
 	properties.Println()
 
-	if _, err := zk.GetAllScannedEvents(); err != nil {
+	if events, err := zk.GetAllScannedEvents(); err != nil {
 		panic(err)
 	} else {
-		// for _, event := range events {
-		// 	fmt.Printf("Event: %s\n", event)
-		// }
+		fmt.Println("Number of events:", len(events))
+		for _, event := range events {
+			fmt.Println("Event:", event)
+		}
 	}
 }

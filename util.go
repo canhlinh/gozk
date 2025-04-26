@@ -244,15 +244,11 @@ func newUDPConnection(host string, port int) (*net.UDPConn, error) {
 	return conn, nil
 }
 
-func newSocketConnection(protocol Protocol, host string, port int) (net.Conn, error) {
-	switch protocol {
-	case TCP:
+func newSocketConnection(tcp bool, host string, port int) (net.Conn, error) {
+	if tcp {
 		return newTCPConnection(host, port)
-	case UDP:
-		return newUDPConnection(host, port)
-	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
 	}
+	return newUDPConnection(host, port)
 }
 
 func ljust(data []byte, len int) []byte {
