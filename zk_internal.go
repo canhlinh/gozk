@@ -47,17 +47,17 @@ func (zk *ZK) GetProperties() (*ZKProperties, error) {
 		return nil, err
 	}
 
-	if _, err := zk.sendCommand(CMD_GET_FREE_SIZES, nil, 1024); err != nil {
+	res, err := zk.sendCommand(CMD_GET_FREE_SIZES, nil, 1024)
+	if err != nil {
 		return nil, err
 	}
 
-	if len(zk.lastData) >= 80 {
+	if len(res.Data) >= 80 {
 		pad := []string{}
 		for i := 0; i < 20; i++ {
 			pad = append(pad, "i")
 		}
-		zk.lastData = zk.lastData[:80]
-		data, err := unpack(pad, zk.lastData)
+		data, err := unpack(pad, res.Data[:80])
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (zk *ZK) GetProperties() (*ZKProperties, error) {
 			UserCap:      data[15].(int),
 			RecordCap:    data[16].(int),
 		}, nil
-	} else if len(zk.lastData) >= 12 {
+	} else if len(res.Data) >= 12 {
 		return nil, errors.New("failed to read data")
 	}
 
@@ -97,27 +97,28 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 	if res.Code == CMD_DATA {
 		switch zk.protocol {
 		case TCP:
-			if need := res.TCPLength - 8 - len(zk.lastData); need > 0 {
+			if need := res.TCPLength - 8 - len(res.Data); need > 0 {
 				moreData, err := zk.receiveRawData(need)
 				if err != nil {
 					return nil, 0, err
 				}
-				data := append(zk.lastData, moreData...)
+				data := append(res.Data, moreData...)
 				return data, len(data), nil
 			}
-			return zk.lastData, len(zk.lastData), nil
+			return res.Data, len(res.Data), nil
 		case UDP:
-			return zk.lastData, len(zk.lastData), nil
+			return res.Data, len(res.Data), nil
 		}
 	}
 
-	sizeUnpack, err := newBP().UnPack([]string{"I"}, zk.lastData[1:5])
+	sizeUnpack, err := newBP().UnPack([]string{"I"}, res.Data[1:5])
 	if err != nil {
 		return nil, 0, err
 	}
 
 	size := sizeUnpack[0].(int)
 	remain := size % zk.maxChunk
+	fmt.Printf("SIZE %d MAX_CHUNK %d REMAIN %d \n", size, zk.maxChunk, remain)
 	packets := (size - remain) / zk.maxChunk
 
 	fmt.Println("size:", size, "packets:", packets, "remain:", remain)
@@ -125,22 +126,25 @@ func (zk *ZK) readWithBuffer(command, fct, ext int) ([]byte, int, error) {
 	start := 0
 
 	for i := 0; i < packets; i++ {
-		d, err := zk.readChunk(start, zk.maxChunk)
+		chunk, err := zk.readChunk(start, zk.maxChunk)
 		if err != nil {
 			return nil, 0, err
 		}
-		data = append(data, d...)
+		data = append(data, chunk...)
 		start += zk.maxChunk
+		fmt.Println("read chunk", i, "of", packets, "length", len(data))
 	}
 
 	if remain > 0 {
-		d, err := zk.readChunk(start, remain)
+		fmt.Printf("Remain before read chunk len:%d start:%d remain: %d\n", len(data), start, remain)
+		chunk, err := zk.readChunk(start, remain)
 		if err != nil {
 			return nil, 0, err
 		}
-
-		data = append(data, d...)
+		fmt.Println("chunk remain", len(chunk))
+		data = append(data, chunk...)
 		start += remain
+		fmt.Println("Remain After read chunk", "length", len(data))
 	}
 
 	if err := zk.freeData(); err != nil {
@@ -182,7 +186,7 @@ func (zk *ZK) tryReadChunk(start, size int) ([]byte, error) {
 	}
 	responseSize := size + 32
 	if zk.protocol == UDP {
-		responseSize = 1024 + 8
+		responseSize = UDP_CHUNK_SIZE
 	}
 
 	res, err := zk.sendCommand(CMD_READ_BUFFER, commandString, responseSize)
@@ -190,7 +194,7 @@ func (zk *ZK) tryReadChunk(start, size int) ([]byte, error) {
 		return nil, err
 	}
 
-	data, err := zk.receiveChunk(res.Code, res.TCPLength)
+	data, err := zk.receiveChunk(res)
 	if err != nil {
 		return nil, err
 	}
@@ -213,35 +217,34 @@ func (zk *ZK) readChunk(start, size int) ([]byte, error) {
 	return nil, errors.New("can't read chunk")
 }
 
-func (zk *ZK) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
-	switch responseCode {
+func (zk *ZK) receiveChunk(res *Response) ([]byte, error) {
+	switch res.Code {
 	case CMD_DATA:
 		if zk.protocol == TCP {
-			if need := tcpLength - 8 - len(zk.lastData); need > 0 {
+			if need := res.TCPLength - 8 - len(res.Data); need > 0 {
 				moreData, err := zk.receiveRawData(need)
 				if err != nil {
 					return nil, err
 				}
-				return append(zk.lastData, moreData...), nil
+				return append(res.Data, moreData...), nil
 			}
-			return zk.lastData, nil
+			return res.Data, nil
 		} else {
-			return zk.lastData, nil
+			return res.Data, nil
 		}
 
 	case CMD_PREPARE_DATA:
-		data := []byte{}
-		size, err := getDataSize(responseCode, zk.lastData)
-		if err != nil {
-			return nil, err
-		}
-
 		if zk.protocol == TCP {
+			data := []byte{}
+			size, err := getDataSize(res.Code, res.Data)
+			if err != nil {
+				return nil, err
+			}
 			var dataReceived []byte
-			if len(zk.lastData) >= 8+size {
-				dataReceived = zk.lastData[8:]
+			if len(res.Data) >= 8+size {
+				dataReceived = res.Data[8:]
 			} else {
-				dataReceived = append(zk.lastData[8:], zk.mustReceiveData(size+32)...)
+				dataReceived = append(res.Data[8:], zk.mustReceiveData(size+32)...)
 			}
 			d, brokenHeader, err := zk.receiveTCPData(dataReceived, size)
 			if err != nil {
@@ -273,16 +276,18 @@ func (zk *ZK) receiveChunk(responseCode int, tcpLength int) ([]byte, error) {
 			return []byte{}, nil
 		}
 
+		data := []byte{}
 		for {
-			dataReceived := make([]byte, 1024+8)
-			if _, err := zk.conn.Read(dataReceived); err != nil {
+			dataReceived := make([]byte, UDP_CHUNK_SIZE)
+			n, err := zk.conn.Read(dataReceived)
+			if err != nil {
 				return nil, err
 			}
-			response := mustUnpack([]string{"H", "H", "H", "H"}, dataReceived[:8])[0].(int)
-			switch response {
+			dataReceived = dataReceived[:n]
+			responseCode := mustUnpack([]string{"H", "H", "H", "H"}, dataReceived[:8])[0].(int)
+			switch responseCode {
 			case CMD_DATA:
 				data = append(data, dataReceived[8:]...)
-				size -= 1024
 			case CMD_ACK_OK:
 				return data, nil
 			default:
@@ -454,15 +459,22 @@ func (zk *ZK) ackOK() error {
 	if err != nil {
 		return err
 	}
-	top, err := createTCPTop(buf)
-	if err != nil {
-		return err
-	}
 
-	if n, err := zk.conn.Write(top); err != nil {
-		return err
-	} else if n == 0 {
-		return errors.New("failed to write command")
+	switch zk.protocol {
+	case TCP:
+		top, err := createTCPTop(buf)
+		if err != nil {
+			return err
+		}
+		if _, err := zk.conn.Write(top); err != nil {
+			return err
+		}
+	case UDP:
+		if _, err := zk.conn.Write(buf); err != nil {
+			return err
+		}
+	default:
+		return nil
 	}
 
 	return nil

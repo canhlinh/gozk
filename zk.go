@@ -1,7 +1,6 @@
 package gozk
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -38,7 +37,6 @@ type ZK struct {
 	port      int
 	pin       int
 	loc       *time.Location
-	lastData  []byte
 	disabled  bool
 	capturing chan bool
 	deviceID  string
@@ -108,6 +106,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 
 	var receivedHeader []interface{}
 	var tcpLength int
+	var data []byte
 	switch zk.protocol {
 	case TCP:
 		top, err := createTCPTop(header)
@@ -133,7 +132,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 		if err != nil {
 			return nil, err
 		}
-		zk.lastData = tcpDataRecieved[16:bytesReceived]
+		data = tcpDataRecieved[16:bytesReceived]
 	case UDP:
 		if n, err := zk.conn.Write(header); err != nil {
 			return nil, err
@@ -142,15 +141,16 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 		}
 		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
 		udpDataRecieved := make([]byte, responseSize)
-		_, err := zk.conn.Read(udpDataRecieved)
+		n, err := zk.conn.Read(udpDataRecieved)
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
 		}
+		udpDataRecieved = udpDataRecieved[:n]
 		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, udpDataRecieved[:8])
 		if err != nil {
 			return nil, err
 		}
-		zk.lastData = udpDataRecieved[8:]
+		data = udpDataRecieved[8:]
 	default:
 		return nil, errors.New("Protocol unsupported")
 	}
@@ -166,7 +166,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			Code:      resCode,
 			TCPLength: tcpLength,
 			CommandID: commandID,
-			Data:      zk.lastData,
+			Data:      data,
 			ReplyID:   zk.replyID,
 		}, nil
 	default:
@@ -175,7 +175,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			Code:      resCode,
 			TCPLength: tcpLength,
 			CommandID: commandID,
-			Data:      zk.lastData,
+			Data:      data,
 			ReplyID:   zk.replyID,
 		}, nil
 	}
@@ -243,6 +243,8 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 		return nil, err
 	}
 
+	fmt.Println("LENGHT of data", len(data), "size of data", size)
+
 	if size < 4 {
 		return []*ScanEvent{}, nil
 	}
@@ -273,10 +275,9 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 
 		userID, err := strconv.ParseInt(strings.Replace(v[1].(string), "\x00", "", -1), 10, 64)
 		if err == nil {
-			attendances = append(attendances, &ScanEvent{DeviceID: zk.deviceID, Timestamp: timestamp, UserID: userID})
-		} else {
-			fmt.Println(hex.EncodeToString(ljust(data, 40)))
+			return nil, err
 		}
+		attendances = append(attendances, &ScanEvent{DeviceID: zk.deviceID, Timestamp: timestamp, UserID: userID})
 		data = data[40:]
 	}
 
@@ -356,9 +357,15 @@ func (zk *ZK) StartCapturing(outerChan chan<- *ScanEvent) error {
 					continue
 				}
 
-				// size := mustUnpack([]string{"H", "H", "I"}, data[:8])[2].(int)
-				header := mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
-				data = data[16:]
+				var header []interface{}
+				switch zk.protocol {
+				case TCP:
+					header = mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
+					data = data[16:]
+				case UDP:
+					header = mustUnpack([]string{"H", "H", "H", "H"}, data[:8])
+					data = data[8:]
+				}
 
 				if header[0].(int) != CMD_REG_EVENT {
 					continue

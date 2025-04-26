@@ -7,7 +7,7 @@ import (
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
-	// GetAllScannedEvents(gozk.TCP)
+	GetAllScannedEvents(gozk.TCP)
 	GetAllScannedEvents(gozk.UDP)
 }
 
