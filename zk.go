@@ -2,8 +2,6 @@ package gozk
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -81,95 +79,6 @@ func (zk *ZK) Connect() error {
 
 	logrus.Info("Connected to the device with session_id:", zk.sessionID)
 	return nil
-}
-
-func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (*Response, error) {
-	if zk.capturing != nil {
-		return nil, errors.New("cannot send command when capturing")
-	}
-
-	if commandString == nil {
-		commandString = make([]byte, 0)
-	}
-
-	header, err := createHeader(command, commandString, zk.sessionID, zk.replyID)
-	if err != nil {
-		return nil, err
-	}
-
-	var receivedHeader []interface{}
-	var tcpLength int
-	var data []byte
-
-	if zk.tcp {
-		top, err := createTCPTop(header)
-		if err != nil && err != io.EOF {
-			return nil, err
-		}
-		if n, err := zk.conn.Write(top); err != nil {
-			return nil, err
-		} else if n == 0 {
-			return nil, errors.New("failed to write command")
-		}
-		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
-		tcpDataRecieved := make([]byte, responseSize+8)
-		bytesReceived, err := zk.conn.Read(tcpDataRecieved)
-		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
-		}
-		tcpLength = testTCPTop(tcpDataRecieved)
-		if bytesReceived == 0 || tcpLength == 0 {
-			return nil, errors.New("TCP packet invalid")
-		}
-		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, tcpDataRecieved[8:16])
-		if err != nil {
-			return nil, err
-		}
-		data = tcpDataRecieved[16:bytesReceived]
-	} else {
-		if n, err := zk.conn.Write(header); err != nil {
-			return nil, err
-		} else if n == 0 {
-			return nil, errors.New("failed to write command")
-		}
-		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
-		udpDataRecieved := make([]byte, responseSize)
-		n, err := zk.conn.Read(udpDataRecieved)
-		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
-		}
-		udpDataRecieved = udpDataRecieved[:n]
-		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, udpDataRecieved[:8])
-		if err != nil {
-			return nil, err
-		}
-		data = udpDataRecieved[8:]
-	}
-
-	resCode := receivedHeader[0].(int)
-	commandID := receivedHeader[2].(int)
-	zk.replyID = receivedHeader[3].(int)
-
-	switch resCode {
-	case CMD_ACK_OK, CMD_PREPARE_DATA, CMD_DATA:
-		return &Response{
-			Status:    true,
-			Code:      resCode,
-			TCPLength: tcpLength,
-			CommandID: commandID,
-			Data:      data,
-			ReplyID:   zk.replyID,
-		}, nil
-	default:
-		return &Response{
-			Status:    false,
-			Code:      resCode,
-			TCPLength: tcpLength,
-			CommandID: commandID,
-			Data:      data,
-			ReplyID:   zk.replyID,
-		}, nil
-	}
 }
 
 // Disconnect disconnects out of the machine fingerprint
@@ -402,6 +311,10 @@ func (zk ZK) Clone() *ZK {
 		loc:       zk.loc,
 		sessionID: 0,
 		replyID:   USHRT_MAX - 1,
+		tcp:       zk.tcp,
+		capturing: nil,
+		deviceID:  zk.deviceID,
+		maxChunk:  zk.maxChunk,
 	}
 }
 
@@ -444,6 +357,34 @@ func (zk *ZK) SetTime(t time.Time) error {
 	}
 	if !res.Status {
 		return errors.New("can not set time")
+	}
+	return nil
+}
+
+func (zk *ZK) UnlockTheDoor(delayInSeconds int) error {
+	commandString := mustPack([]string{"I"}, []interface{}{delayInSeconds * 10})
+	res, err := zk.sendCommand(CMD_UNLOCK, commandString, 8)
+	if err != nil {
+		return err
+	}
+	if !res.Status {
+		return errors.New("can not unlock the door")
+	}
+	return nil
+}
+
+func (zk *ZK) WriteLCD(text string) error {
+	if len(text) > 32 {
+		text = text[:32]
+	}
+	commandString := mustPack([]string{"H", "B"}, []interface{}{0, 0})
+	commandString = append(commandString, []byte(" "+text)...)
+	res, err := zk.sendCommand(CMD_WRITE_LCD, commandString, 8)
+	if err != nil {
+		return err
+	}
+	if !res.Status {
+		return errors.New("can not write to LCD")
 	}
 	return nil
 }

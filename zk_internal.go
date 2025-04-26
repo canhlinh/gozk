@@ -2,6 +2,7 @@ package gozk
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -484,4 +485,93 @@ func (zk *ZK) decodeTimeHex(timehex []byte) time.Time {
 func (zk *ZK) encodeTime(t time.Time) int {
 	return (((t.Year()%100)*12*31+((int(t.Month())-1)*31)+t.Day()-1)*
 		(24*60*60) + (t.Hour()*60+t.Minute())*60 + t.Second())
+}
+
+func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (*Response, error) {
+	if zk.capturing != nil {
+		return nil, errors.New("cannot send command when capturing")
+	}
+
+	if commandString == nil {
+		commandString = make([]byte, 0)
+	}
+
+	header, err := createHeader(command, commandString, zk.sessionID, zk.replyID)
+	if err != nil {
+		return nil, err
+	}
+
+	var receivedHeader []interface{}
+	var tcpLength int
+	var data []byte
+
+	if zk.tcp {
+		top, err := createTCPTop(header)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if n, err := zk.conn.Write(top); err != nil {
+			return nil, err
+		} else if n == 0 {
+			return nil, errors.New("failed to write command")
+		}
+		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
+		tcpDataRecieved := make([]byte, responseSize+8)
+		bytesReceived, err := zk.conn.Read(tcpDataRecieved)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
+		}
+		tcpLength = testTCPTop(tcpDataRecieved)
+		if bytesReceived == 0 || tcpLength == 0 {
+			return nil, errors.New("TCP packet invalid")
+		}
+		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, tcpDataRecieved[8:16])
+		if err != nil {
+			return nil, err
+		}
+		data = tcpDataRecieved[16:bytesReceived]
+	} else {
+		if n, err := zk.conn.Write(header); err != nil {
+			return nil, err
+		} else if n == 0 {
+			return nil, errors.New("failed to write command")
+		}
+		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
+		udpDataRecieved := make([]byte, responseSize)
+		n, err := zk.conn.Read(udpDataRecieved)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
+		}
+		udpDataRecieved = udpDataRecieved[:n]
+		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, udpDataRecieved[:8])
+		if err != nil {
+			return nil, err
+		}
+		data = udpDataRecieved[8:]
+	}
+
+	resCode := receivedHeader[0].(int)
+	commandID := receivedHeader[2].(int)
+	zk.replyID = receivedHeader[3].(int)
+
+	switch resCode {
+	case CMD_ACK_OK, CMD_PREPARE_DATA, CMD_DATA:
+		return &Response{
+			Status:    true,
+			Code:      resCode,
+			TCPLength: tcpLength,
+			CommandID: commandID,
+			Data:      data,
+			ReplyID:   zk.replyID,
+		}, nil
+	default:
+		return &Response{
+			Status:    false,
+			Code:      resCode,
+			TCPLength: tcpLength,
+			CommandID: commandID,
+			Data:      data,
+			ReplyID:   zk.replyID,
+		}, nil
+	}
 }
