@@ -84,6 +84,9 @@ func (zk *ZK) Connect() error {
 }
 
 func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (*Response, error) {
+	if zk.capturing != nil {
+		return nil, errors.New("cannot send command when capturing")
+	}
 
 	if commandString == nil {
 		commandString = make([]byte, 0)
@@ -323,18 +326,13 @@ func (zk *ZK) StartCapturing(outerChan chan<- *ScanEvent) error {
 				if err != nil {
 					if !strings.Contains(err.Error(), "timeout") {
 						onConnectionError(err)
-						continue
+						return
 					}
-					if _, err := zk.GetFirmwareVersion(); err != nil {
-						onConnectionError(err)
-						continue
-					}
-					continue
 				}
 
 				if err := zk.ackOK(); err != nil {
 					onConnectionError(err)
-					continue
+					return
 				}
 
 				if len(data) == 0 {
@@ -376,7 +374,7 @@ func (zk *ZK) StartCapturing(outerChan chan<- *ScanEvent) error {
 					userID, err := strconv.ParseInt(strings.Replace(unpack[0].(string), "\x00", "", -1), 10, 64)
 					if err != nil {
 						onConnectionError(err)
-						continue
+						return
 					}
 					event := &ScanEvent{DeviceID: zk.deviceID, UserID: userID, Timestamp: timestamp}
 					outerChan <- event
@@ -390,9 +388,10 @@ func (zk *ZK) StartCapturing(outerChan chan<- *ScanEvent) error {
 	return nil
 }
 
-func (zk ZK) StopCapturing() {
+func (zk *ZK) StopCapturing() {
 	zk.capturing <- true
 	close(zk.capturing)
+
 }
 
 func (zk ZK) Clone() *ZK {
