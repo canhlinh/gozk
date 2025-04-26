@@ -17,19 +17,22 @@ const (
 )
 
 func TestSocketConnect(t *testing.T) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK(testZkHost, WithTimezone(testTimezone), WithTCP(true))
 	require.NoError(t, socket.Connect())
 	require.NoError(t, socket.Disconnect())
 }
 
 func TestSocketGetAttendances(t *testing.T) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK(testZkHost, WithTimezone(testTimezone), WithTCP(true))
 	require.NoError(t, socket.Connect())
 	require.NoError(t, socket.DisableDevice())
 
+	properties, err := socket.GetProperties()
+	require.NoError(t, err)
+
 	attendances, err := socket.GetAllScannedEvents()
 	require.NoError(t, err)
-	t.Log("number of attendances", len(attendances))
+	require.Equal(t, properties.TotalRecords, len(attendances))
 
 	require.NoError(t, socket.EnableDevice())
 	require.NoError(t, socket.Disconnect())
@@ -37,14 +40,14 @@ func TestSocketGetAttendances(t *testing.T) {
 }
 
 func TestSocketGetUsers(t *testing.T) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK(testZkHost, WithTimezone(testTimezone), WithTCP(true))
 	require.NoError(t, socket.Connect())
 	defer socket.Disconnect()
 	require.NoError(t, socket.GetUsers())
 }
 
 func BenchmarkSocketGetAttendances(b *testing.B) {
-	socket := NewZK("", testZkHost, testZkPort, 0, testTimezone)
+	socket := NewZK(testZkHost, WithTimezone(testTimezone), WithTCP(true))
 	require.NoError(b, socket.Connect())
 	defer socket.Disconnect()
 

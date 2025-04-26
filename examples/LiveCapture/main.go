@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/canhlinh/gozk"
 )
 
-func main() {
-	zk := gozk.NewZK("AWZSOME", "192.168.100.201", 4370, 0, gozk.DefaultTimezone)
+func liveCapture(tcp bool) {
+	zk := gozk.NewZK("192.168.100.201", gozk.WithTCP(tcp), gozk.WithTimezone(gozk.DefaultTimezone))
 	if err := zk.Connect(); err != nil {
 		panic(err)
 	}
@@ -20,12 +23,6 @@ func main() {
 	}
 	properties.Println()
 
-	if events, err := zk.GetAllScannedEvents(); err != nil {
-		panic(err)
-	} else {
-		fmt.Printf("Total Events: %d\n", len(events))
-	}
-
 	c := make(chan *gozk.ScanEvent)
 	if err := zk.StartCapturing(c); err != nil {
 		panic(err)
@@ -37,4 +34,20 @@ func main() {
 			continue
 		}
 	}
+}
+
+func main() {
+	go liveCapture(true)
+	go liveCapture(false)
+
+	// Wait system interrupt signal
+
+	// to gracefully shutdown the program
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+	fmt.Println("Shutting down gracefully...")
+	close(c)
+	os.Exit(0)
 }

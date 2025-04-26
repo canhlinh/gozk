@@ -17,33 +17,37 @@ const (
 )
 
 var (
-	KeepAlivePeriod   = time.Second * 10
+	KeepAlivePeriod   = time.Minute
 	ReadSocketTimeout = 3 * time.Second
 )
 
 type ZK struct {
-	conn      *net.TCPConn
+	conn      net.Conn
+	tcp       bool
 	sessionID int
 	replyID   int
 	host      string
 	port      int
 	pin       int
 	loc       *time.Location
-	lastData  []byte
 	disabled  bool
 	capturing chan bool
 	deviceID  string
+	maxChunk  int
 }
 
-func NewZK(deviceID string, host string, port int, pin int, timezone string) *ZK {
+func NewZK(host string, opts ...Option) *ZK {
+	option := composeOption(opts...)
 	return &ZK{
-		deviceID:  deviceID,
-		host:      host,
-		port:      port,
-		pin:       pin,
-		loc:       LoadLocation(timezone),
 		sessionID: 0,
 		replyID:   USHRT_MAX - 1,
+		host:      host,
+		port:      option.port,
+		pin:       option.pin,
+		loc:       option.timezone,
+		deviceID:  option.deviceID,
+		tcp:       option.useTCP,
+		maxChunk:  option.maxChunk,
 	}
 }
 
@@ -51,23 +55,11 @@ func (zk *ZK) Connect() error {
 	if zk.conn != nil {
 		return errors.New("already connected")
 	}
-
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", zk.host, zk.port), 3*time.Second)
+	conn, err := newSocketConnection(zk.tcp, zk.host, zk.port)
 	if err != nil {
 		return err
 	}
-
-	tcpConnection := conn.(*net.TCPConn)
-	if err := tcpConnection.SetKeepAlive(true); err != nil {
-		return err
-	}
-
-	if err := tcpConnection.SetKeepAlivePeriod(KeepAlivePeriod); err != nil {
-		return err
-	}
-
-	zk.conn = tcpConnection
-
+	zk.conn = conn
 	res, err := zk.sendCommand(CMD_CONNECT, nil, 8)
 	if err != nil {
 		return err
@@ -102,36 +94,58 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 		return nil, err
 	}
 
-	top, err := createTCPTop(header)
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
+	var receivedHeader []interface{}
+	var tcpLength int
+	var data []byte
 
-	if n, err := zk.conn.Write(top); err != nil {
-		return nil, err
-	} else if n == 0 {
-		return nil, errors.New("failed to write command")
-	}
-
-	zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
-	tcpDataRecieved := make([]byte, responseSize+8)
-	bytesReceived, err := zk.conn.Read(tcpDataRecieved)
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
-	}
-	tcpLength := testTCPTop(tcpDataRecieved)
-	if bytesReceived == 0 || tcpLength == 0 {
-		return nil, errors.New("TCP packet invalid")
-	}
-	receivedHeader, err := newBP().UnPack([]string{"H", "H", "H", "H"}, tcpDataRecieved[8:16])
-	if err != nil {
-		return nil, err
+	if zk.tcp {
+		top, err := createTCPTop(header)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if n, err := zk.conn.Write(top); err != nil {
+			return nil, err
+		} else if n == 0 {
+			return nil, errors.New("failed to write command")
+		}
+		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
+		tcpDataRecieved := make([]byte, responseSize+8)
+		bytesReceived, err := zk.conn.Read(tcpDataRecieved)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
+		}
+		tcpLength = testTCPTop(tcpDataRecieved)
+		if bytesReceived == 0 || tcpLength == 0 {
+			return nil, errors.New("TCP packet invalid")
+		}
+		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, tcpDataRecieved[8:16])
+		if err != nil {
+			return nil, err
+		}
+		data = tcpDataRecieved[16:bytesReceived]
+	} else {
+		if n, err := zk.conn.Write(header); err != nil {
+			return nil, err
+		} else if n == 0 {
+			return nil, errors.New("failed to write command")
+		}
+		zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
+		udpDataRecieved := make([]byte, responseSize)
+		n, err := zk.conn.Read(udpDataRecieved)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("GOT ERROR %s ON COMMAND %d", err.Error(), command)
+		}
+		udpDataRecieved = udpDataRecieved[:n]
+		receivedHeader, err = newBP().UnPack([]string{"H", "H", "H", "H"}, udpDataRecieved[:8])
+		if err != nil {
+			return nil, err
+		}
+		data = udpDataRecieved[8:]
 	}
 
 	resCode := receivedHeader[0].(int)
 	commandID := receivedHeader[2].(int)
 	zk.replyID = receivedHeader[3].(int)
-	zk.lastData = tcpDataRecieved[16:bytesReceived]
 
 	switch resCode {
 	case CMD_ACK_OK, CMD_PREPARE_DATA, CMD_DATA:
@@ -140,7 +154,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			Code:      resCode,
 			TCPLength: tcpLength,
 			CommandID: commandID,
-			Data:      zk.lastData,
+			Data:      data,
 			ReplyID:   zk.replyID,
 		}, nil
 	default:
@@ -149,7 +163,7 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 			Code:      resCode,
 			TCPLength: tcpLength,
 			CommandID: commandID,
-			Data:      zk.lastData,
+			Data:      data,
 			ReplyID:   zk.replyID,
 		}, nil
 	}
@@ -207,10 +221,6 @@ func (zk *ZK) DisableDevice() error {
 
 // GetAllScannedEvents returns total attendances from the connected device
 func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
-	if err := zk.GetUsers(); err != nil {
-		return nil, err
-	}
-
 	properties, err := zk.GetProperties()
 	if err != nil {
 		return nil, err
@@ -220,7 +230,6 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if size < 4 {
 		return []*ScanEvent{}, nil
 	}
@@ -230,16 +239,15 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 
 	totalSize := mustUnpack([]string{"I"}, totalSizeByte)[0].(int)
 	recordSize := totalSize / properties.TotalRecords
-	attendances := []*ScanEvent{}
 
+	attendances := []*ScanEvent{}
 	if recordSize == 8 || recordSize == 16 {
 		return nil, errors.New("sorry but I'm too lazy to implement this")
-
 	}
 
 	for len(data) >= 40 {
 
-		v, err := newBP().UnPack([]string{"H", "24s", "B", "4s", "B", "8s"}, data[:40])
+		v, err := newBP().UnPack([]string{"H", "24s", "B", "4s", "B", "8s"}, ljust(data, 40))
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +261,6 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 		if err != nil {
 			return nil, err
 		}
-
 		attendances = append(attendances, &ScanEvent{DeviceID: zk.deviceID, Timestamp: timestamp, UserID: userID})
 		data = data[40:]
 	}
@@ -277,7 +284,7 @@ func (zk *ZK) GetUsers() error {
 	return nil
 }
 
-func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
+func (zk *ZK) StartCapturing(outerChan chan<- *ScanEvent) error {
 	if zk.capturing != nil {
 		return errors.New("already capturing")
 	}
@@ -334,9 +341,14 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 					continue
 				}
 
-				// size := mustUnpack([]string{"H", "H", "I"}, data[:8])[2].(int)
-				header := mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
-				data = data[16:]
+				var header []interface{}
+				if zk.tcp {
+					header = mustUnpack([]string{"H", "H", "H", "H"}, data[8:16])
+					data = data[16:]
+				} else {
+					header = mustUnpack([]string{"H", "H", "H", "H"}, data[:8])
+					data = data[8:]
+				}
 
 				if header[0].(int) != CMD_REG_EVENT {
 					continue
@@ -379,7 +391,8 @@ func (zk *ZK) StartCapturing(outerChan chan *ScanEvent) error {
 }
 
 func (zk ZK) StopCapturing() {
-	zk.capturing <- false
+	zk.capturing <- true
+	close(zk.capturing)
 }
 
 func (zk ZK) Clone() *ZK {
