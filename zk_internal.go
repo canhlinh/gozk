@@ -215,6 +215,14 @@ func (zk *ZK) readChunk(start, size int) ([]byte, error) {
 }
 
 func (zk *ZK) receiveChunk(res *Response) ([]byte, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			err := fmt.Errorf("fail to receive chunk: %v\n%s", r, buf[:n])
+			logrus.Error(err)
+		}
+	}()
 	switch res.Code {
 	case CMD_DATA:
 		if zk.tcp {
