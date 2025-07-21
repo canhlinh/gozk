@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/canhlinh/gozk"
 	"github.com/sirupsen/logrus"
@@ -30,8 +31,11 @@ func GetAllScannedEvents(tcp bool) {
 		panic(err)
 	} else {
 		fmt.Println("Number of events:", len(events))
+		now := time.Now()
 		for _, event := range events {
-			fmt.Println("Event:", event)
+			if event.Timestamp.Day() == 22 && event.Timestamp.Month() == now.Month() && event.Timestamp.Year() == now.Year() && event.UserID == 41 {
+				fmt.Println("Event:", event)
+			}
 		}
 	}
 }

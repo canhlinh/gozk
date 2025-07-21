@@ -48,6 +48,8 @@ func (zk *ZK) GetProperties() (*ZKProperties, error) {
 		return nil, err
 	}
 
+	fmt.Println("Firmware Version:", version)
+
 	clock, err := zk.GetTime()
 	if err != nil {
 		return nil, err
@@ -433,8 +435,6 @@ func (zk *ZK) regEvent(flag int) error {
 
 func (zk *ZK) receiveData(size int, timeout time.Duration) ([]byte, error) {
 	data := make([]byte, size)
-	defer zk.conn.SetReadDeadline(time.Now().Add(ReadSocketTimeout))
-
 	zk.conn.SetReadDeadline(time.Now().Add(timeout))
 	n, err := zk.conn.Read(data)
 	if err != nil {
@@ -506,6 +506,15 @@ func (zk *ZK) sendCommand(command int, commandString []byte, responseSize int) (
 	var data []byte
 
 	if zk.tcp {
+		// top = self.__create_tcp_top(buf)
+		// self.__sock.send(top)
+		// self.__tcp_data_recv = self.__sock.recv(response_size + 8)
+		// self.__tcp_length = self.__test_tcp_top(self.__tcp_data_recv)
+		// if self.__tcp_length == 0:
+		//     raise ZKNetworkError("TCP packet invalid")
+		// self.__header = unpack('<4H', self.__tcp_data_recv[8:16])
+		// self.__data_recv = self.__tcp_data_recv[8:]
+
 		top, err := createTCPTop(header)
 		if err != nil && err != io.EOF {
 			return nil, err

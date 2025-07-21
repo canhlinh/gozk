@@ -169,7 +169,7 @@ func (zk *ZK) GetAllScannedEvents() ([]*ScanEvent, error) {
 			return nil, err
 		}
 
-		userID, err := strconv.ParseInt(strings.Replace(v[1].(string), "\x00", "", -1), 10, 64)
+		userID, err := strconv.ParseInt(strings.ReplaceAll(v[1].(string), "\x00", ""), 10, 64)
 		if err != nil {
 			return nil, err
 		}
@@ -319,7 +319,6 @@ func (zk ZK) Clone() *ZK {
 }
 
 func (zk *ZK) GetFirmwareVersion() (string, error) {
-	zk.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	res, err := zk.sendCommand(CMD_GET_VERSION, nil, 1024)
 	if err != nil {
 		return "", err

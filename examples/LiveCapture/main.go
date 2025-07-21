@@ -5,11 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/canhlinh/gozk"
 )
 
-func liveCapture(tcp bool) {
+func liveCapture(tcp bool, quit chan bool) {
 	zk := gozk.NewZK("192.168.100.201", gozk.WithTCP(tcp), gozk.WithTimezone(gozk.DefaultTimezone))
 	if err := zk.Connect(); err != nil {
 		panic(err)
@@ -28,17 +29,27 @@ func liveCapture(tcp bool) {
 		panic(err)
 	}
 
-	for event := range c {
-		if event.Error != nil {
-			fmt.Printf("Error: %s\n", event.Error.Error())
-			continue
+	for {
+		select {
+		case event := <-c:
+			if event == nil {
+				fmt.Println("Capture stopped")
+				return
+			}
+			fmt.Printf("Captured event: %+v\n", event)
+		case <-quit:
+			fmt.Println("Stopping capture...")
+			zk.StopCapturing()
+			zk.Disconnect()
+			return
 		}
 	}
 }
 
 func main() {
-	go liveCapture(true)
-	go liveCapture(false)
+	quit := make(chan bool)
+	go liveCapture(true, quit)
+	go liveCapture(false, quit)
 
 	// Wait system interrupt signal
 
@@ -49,5 +60,8 @@ func main() {
 	<-c
 	fmt.Println("Shutting down gracefully...")
 	close(c)
+	close(quit)
+	time.Sleep(2 * time.Second) // Allow time for goroutines to finish
+	fmt.Println("Shutdown complete.")
 	os.Exit(0)
 }
